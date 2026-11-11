@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 440" width="100%" height="auto">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0  0 0 0 0.45 0"/>
+      <feOffset dx="0" dy="10" result="offset"/>
+      <feMerge>
+        <feMergeNode in="offset"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="barGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+
+  <style>
+    .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; fill: #94A3B8; font-weight: 500; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 13.5px; line-height: 1.6; }
+    .prompt { fill: #38BDF8; font-weight: 600; }
+    .cmd { fill: #F8FAFC; }
+    .tag { fill: #38BDF8; font-weight: 600; }
+    .bold { fill: #F1F5F9; font-weight: 600; }
+    .dim { fill: #64748B; }
+    .text { fill: #CBD5E1; }
+    .green { fill: #4ADE80; font-weight: 600; }
+    .yellow { fill: #FACC15; font-weight: 600; }
+    .cyan { fill: #22D3EE; }
+    .accent { fill: #A855F7; }
+  </style>
+
+  <!-- Window Container with Drop Shadow -->
+  <rect x="25" y="20" width="830" height="395" rx="12" fill="#0F172A" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+
+  <!-- Title Bar -->
+  <path d="M 25 32 Q 25 20 37 20 L 843 20 Q 855 20 855 32 L 855 62 L 25 62 Z" fill="#1E293B"/>
+  <line x1="25" y1="62" x2="855" y2="62" stroke="#334155" stroke-width="1"/>
+
+  <!-- Window Control Buttons -->
+  <circle cx="50" cy="41" r="6.5" fill="#EF4444"/>
+  <circle cx="70" cy="41" r="6.5" fill="#F59E0B"/>
+  <circle cx="90" cy="41" r="6.5" fill="#10B981"/>
+
+  <!-- Window Title -->
+  <text x="440" y="46" text-anchor="middle" class="title">deox — Segmented Download Acceleration (Modern C++23)</text>
+
+  <!-- Terminal Content -->
+  <g class="mono">
+    <!-- Command Prompt -->
+    <text x="50" y="98">
+      <tspan class="prompt">ghost@workstation</tspan><tspan class="dim">:</tspan><tspan class="cyan">~/downloads</tspan><tspan class="dim">$</tspan>
+      <tspan class="cmd"> deox -c 4 -o ubuntu-24.04.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso</tspan>
+    </text>
+
+    <!-- Phase 1: Probing -->
+    <text x="50" y="132">
+      <tspan class="tag">[deox]</tspan> <tspan class="bold">Probing remote server</tspan><tspan class="dim">: Connecting to releases.ubuntu.com... (HTTP 200 OK)</tspan>
+    </text>
+
+    <!-- Phase 2: Planning -->
+    <text x="50" y="160">
+      <tspan class="tag">[deox]</tspan> <tspan class="bold">Planning chunks and allocation</tspan><tspan class="text">: Total 5.80 GB, 4 parallel workers (1.45 GB/chunk)</tspan>
+    </text>
+
+    <!-- Phase 3: Disk Preallocation -->
+    <text x="50" y="188">
+      <tspan class="tag">[deox]</tspan> <tspan class="bold">Disk storage</tspan><tspan class="dim">: Pre-allocated 5.80 GB contiguous space (posix_fallocate zero-fragmentation)</tspan>
+    </text>
+
+    <!-- Phase 4: Downloading Multi-bar Display -->
+    <text x="50" y="222">
+      <tspan class="tag">[deox]</tspan> <tspan class="bold">Downloading</tspan><tspan class="dim">: 4 parallel connection streams active</tspan>
+    </text>
+
+    <!-- Progress Bar Graphical Box -->
+    <rect x="50" y="244" width="780" height="96" rx="8" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+
+    <!-- Top line: Bar + Stats -->
+    <g transform="translate(68, 268)">
+      <!-- Progress Bar Track -->
+      <rect x="0" y="0" width="340" height="14" rx="4" fill="#0F172A"/>
+      <!-- Progress Bar Filled (68.5%) -->
+      <rect x="0" y="0" width="233" height="14" rx="4" fill="url(#barGrad)"/>
+
+      <text x="355" y="12" class="green">68.5%</text>
+      <text x="415" y="12" class="dim">|</text>
+      <text x="430" y="12" class="text">3.97 GB / 5.80 GB</text>
+      <text x="575" y="12" class="dim">|</text>
+      <text x="590" y="12" class="yellow">118.4 MB/s</text>
+      <text x="685" y="12" class="dim">|</text>
+      <text x="700" y="12" class="cyan">ETA: 00m 15s</text>
+    </g>
+
+    <!-- Bottom line: Segments breakdown -->
+    <g transform="translate(68, 305)">
+      <text x="0" y="14" class="bold">Segments (4):</text>
+      <!-- Segment 1 -->
+      <rect x="110" y="0" width="85" height="22" rx="4" fill="#065F46"/>
+      <text x="152" y="15" text-anchor="middle" class="green">1: 100%</text>
+
+      <!-- Segment 2 -->
+      <rect x="205" y="0" width="85" height="22" rx="4" fill="#065F46"/>
+      <text x="247" y="15" text-anchor="middle" class="green">2: 100%</text>
+
+      <!-- Segment 3 -->
+      <rect x="300" y="0" width="85" height="22" rx="4" fill="#854D0E"/>
+      <text x="342" y="15" text-anchor="middle" class="yellow">3:  54%</text>
+
+      <!-- Segment 4 -->
+      <rect x="395" y="0" width="85" height="22" rx="4" fill="#854D0E"/>
+      <text x="437" y="15" text-anchor="middle" class="yellow">4:  20%</text>
+
+      <text x="500" y="15" class="dim">Lock-free pwrite(2) • Zero locks</text>
+    </g>
+
+    <!-- Verification note -->
+    <text x="50" y="375">
+      <tspan class="dim">✓ Checkpoint auto-saved to </tspan><tspan class="text">ubuntu-24.04.iso.deox</tspan><tspan class="dim"> (atomic rename crash recovery)</tspan>
+    </text>
+  </g>
+</svg>
