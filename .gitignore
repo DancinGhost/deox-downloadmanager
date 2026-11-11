@@ -1,0 +1,29 @@
+# Build directories
+build/
+bin/
+lib/
+out/
+cmake-build-*/
+.cache/
+
+# Artifacts
+compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Download artifacts and checkpoints
+*.deox
+*.deox.tmp
+*.part
+downloads/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
