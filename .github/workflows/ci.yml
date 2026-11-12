@@ -8,8 +8,9 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         compiler: [gcc, clang]
         build_type: [Release, Debug]
@@ -17,9 +18,11 @@ jobs:
           - compiler: gcc
             cxx: g++-14
             cc: gcc-14
+            packages: g++-14 gcc-14
           - compiler: clang
             cxx: clang++-18
             cc: clang-18
+            packages: clang-18 llvm-18 g++-14 libstdc++-14-dev
 
     steps:
     - uses: actions/checkout@v4
@@ -27,7 +30,7 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev qt6-base-dev cmake ninja-build
+        sudo apt-get install -y libcurl4-openssl-dev qt6-base-dev cmake ninja-build ${{ matrix.packages }}
 
     - name: Configure CMake
       run: |
