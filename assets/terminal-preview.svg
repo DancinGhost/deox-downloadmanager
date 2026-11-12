@@ -43,34 +43,34 @@
   <circle cx="90" cy="41" r="6.5" fill="#10B981"/>
 
   <!-- Window Title -->
-  <text x="440" y="46" text-anchor="middle" class="title">deox — Segmented Download Acceleration (Modern C++23)</text>
+  <text x="440" y="46" text-anchor="middle" class="title">deox-dm — Deox Download Manager (Modern C++23)</text>
 
   <!-- Terminal Content -->
   <g class="mono">
     <!-- Command Prompt -->
     <text x="50" y="98">
       <tspan class="prompt">ghost@workstation</tspan><tspan class="dim">:</tspan><tspan class="cyan">~/downloads</tspan><tspan class="dim">$</tspan>
-      <tspan class="cmd"> deox -c 4 -o ubuntu-24.04.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso</tspan>
+      <tspan class="cmd"> deox-dm -c 4 -o ubuntu-24.04.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso</tspan>
     </text>
 
     <!-- Phase 1: Probing -->
     <text x="50" y="132">
-      <tspan class="tag">[deox]</tspan> <tspan class="bold">Probing remote server</tspan><tspan class="dim">: Connecting to releases.ubuntu.com... (HTTP 200 OK)</tspan>
+      <tspan class="tag">[deox-dm]</tspan> <tspan class="bold">Probing remote server</tspan><tspan class="dim">: Connecting to releases.ubuntu.com... (HTTP 200 OK)</tspan>
     </text>
 
     <!-- Phase 2: Planning -->
     <text x="50" y="160">
-      <tspan class="tag">[deox]</tspan> <tspan class="bold">Planning chunks and allocation</tspan><tspan class="text">: Total 5.80 GB, 4 parallel workers (1.45 GB/chunk)</tspan>
+      <tspan class="tag">[deox-dm]</tspan> <tspan class="bold">Planning chunks and allocation</tspan><tspan class="text">: Total 5.80 GB, 4 parallel workers (1.45 GB/chunk)</tspan>
     </text>
 
     <!-- Phase 3: Disk Preallocation -->
     <text x="50" y="188">
-      <tspan class="tag">[deox]</tspan> <tspan class="bold">Disk storage</tspan><tspan class="dim">: Pre-allocated 5.80 GB contiguous space (posix_fallocate zero-fragmentation)</tspan>
+      <tspan class="tag">[deox-dm]</tspan> <tspan class="bold">Disk storage</tspan><tspan class="dim">: Pre-allocated 5.80 GB contiguous space (posix_fallocate zero-fragmentation)</tspan>
     </text>
 
     <!-- Phase 4: Downloading Multi-bar Display -->
     <text x="50" y="222">
-      <tspan class="tag">[deox]</tspan> <tspan class="bold">Downloading</tspan><tspan class="dim">: 4 parallel connection streams active</tspan>
+      <tspan class="tag">[deox-dm]</tspan> <tspan class="bold">Downloading</tspan><tspan class="dim">: 4 parallel connection streams active</tspan>
     </text>
 
     <!-- Progress Bar Graphical Box -->
@@ -116,7 +116,7 @@
 
     <!-- Verification note -->
     <text x="50" y="375">
-      <tspan class="dim">✓ Checkpoint auto-saved to </tspan><tspan class="text">ubuntu-24.04.iso.deox</tspan><tspan class="dim"> (atomic rename crash recovery)</tspan>
+      <tspan class="dim">✓ Checkpoint auto-saved to </tspan><tspan class="text">ubuntu-24.04.iso.deoxdm</tspan><tspan class="dim"> (atomic rename crash recovery)</tspan>
     </text>
   </g>
 </svg>

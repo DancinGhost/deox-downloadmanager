@@ -1,11 +1,68 @@
-#include "deox/core/url.hpp"
+// SPDX-License-Identifier: MIT
+#include "deoxdm/core/url.hpp"
+
 #include <algorithm>
 #include <charconv>
 
-namespace deox::core {
+namespace deoxdm::core {
+
+namespace {
+
+constexpr std::string_view kFallbackName = "download.bin";
+constexpr size_t kMaxFilenameBytes = 200; // leaves room for ".deoxdm.tmp" and ".N" suffixes under NAME_MAX
+
+constexpr char ascii_lower(char c) noexcept {
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+constexpr int hex_value(char c) noexcept {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+constexpr bool is_space(char c) noexcept {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+std::string_view trim(std::string_view s) noexcept {
+    while (!s.empty() && is_space(s.front())) s.remove_prefix(1);
+    while (!s.empty() && is_space(s.back())) s.remove_suffix(1);
+    return s;
+}
+
+bool starts_with_icase(std::string_view text, std::string_view prefix) noexcept {
+    if (text.size() < prefix.size()) return false;
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        if (ascii_lower(text[i]) != ascii_lower(prefix[i])) return false;
+    }
+    return true;
+}
+
+// Position of the extension that should stay at the end of a numbered name.
+size_t extension_start(std::string_view name) noexcept {
+    const size_t last_dot = name.rfind('.');
+    if (last_dot == std::string_view::npos || last_dot == 0) {
+        return name.size();
+    }
+    // Keep compound archive extensions such as ".tar.gz" together.
+    const std::string_view stem = name.substr(0, last_dot);
+    constexpr std::string_view tar = ".tar";
+    if (stem.size() > tar.size() && starts_with_icase(stem.substr(stem.size() - tar.size()), tar)) {
+        return stem.size() - tar.size();
+    }
+    return last_dot;
+}
+
+} // namespace
 
 std::string Url::full_url() const {
-    std::string res = scheme + "://" + host;
+    std::string res = scheme + "://";
+    if (!userinfo.empty()) {
+        res += userinfo + "@";
+    }
+    res += host;
     const bool default_port = (scheme == "http" && port == 80) || (scheme == "https" && port == 443);
     if (port != 0 && !default_port) {
         res += ":" + std::to_string(port);
@@ -20,12 +77,26 @@ std::string Url::full_url() const {
     return res;
 }
 
-std::string sanitize_filename(std::string_view filename) noexcept {
-    if (filename.empty()) {
-        return "download.bin";
+std::string percent_decode(std::string_view text) noexcept {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '%' && i + 2 < text.size()) {
+            const int hi = hex_value(text[i + 1]);
+            const int lo = hex_value(text[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back(text[i]);
     }
+    return out;
+}
 
-    // Strip directory components if any
+std::string sanitize_filename(std::string_view filename) noexcept {
+    // Keep only the last path component, whichever separator was used.
     const auto last_slash = filename.find_last_of("/\\");
     if (last_slash != std::string_view::npos) {
         filename = filename.substr(last_slash + 1);
@@ -35,118 +106,216 @@ std::string sanitize_filename(std::string_view filename) noexcept {
     sanitized.reserve(filename.size());
 
     for (const char ch : filename) {
-        // Disallow dangerous characters, control characters, nulls
-        if (ch >= 32 && ch <= 126 && ch != '/' && ch != '\\' && ch != ':' && 
-            ch != '*' && ch != '?' && ch != '"' && ch != '<' && ch != '>' && ch != '|') {
-            sanitized.push_back(ch);
-        } else {
-            sanitized.push_back('_');
-        }
+        const auto byte = static_cast<unsigned char>(ch);
+        const bool control = byte < 32 || byte == 127;
+        const bool reserved = ch == ':' || ch == '*' || ch == '?' || ch == '"' ||
+                              ch == '<' || ch == '>' || ch == '|';
+        // Bytes >= 0x80 are parts of UTF-8 sequences and are kept as they are.
+        sanitized.push_back((control || reserved) ? '_' : ch);
     }
 
-    // Avoid '.' or '..' or empty
+    // Leading/trailing spaces and trailing dots are trouble on several file systems.
+    while (!sanitized.empty() && sanitized.front() == ' ') sanitized.erase(sanitized.begin());
+    while (!sanitized.empty() && (sanitized.back() == ' ' || sanitized.back() == '.')) sanitized.pop_back();
+
+    if (sanitized.size() > kMaxFilenameBytes) {
+        // Shorten the stem and keep the extension, without splitting a UTF-8 sequence.
+        const size_t ext_pos = extension_start(sanitized);
+        std::string ext = sanitized.substr(ext_pos);
+        if (ext.size() > 32) ext.clear();
+        size_t keep = kMaxFilenameBytes - ext.size();
+        while (keep > 0 && (static_cast<unsigned char>(sanitized[keep]) & 0xC0) == 0x80) --keep;
+        sanitized = sanitized.substr(0, keep) + ext;
+    }
+
     if (sanitized.empty() || sanitized == "." || sanitized == "..") {
-        return "download.bin";
+        return std::string(kFallbackName);
     }
 
     return sanitized;
 }
 
 std::string extract_filename_from_url(std::string_view path, std::string_view fallback) noexcept {
-    // Strip query or fragment if present in raw path
     const auto q_pos = path.find_first_of("?#");
     if (q_pos != std::string_view::npos) {
         path = path.substr(0, q_pos);
     }
 
-    // Strip trailing slashes
-    while (!path.empty() && (path.back() == '/' || path.back() == '\\')) {
+    while (!path.empty() && path.back() == '/') {
         path.remove_suffix(1);
     }
 
-    const auto last_slash = path.find_last_of("/\\");
-    std::string_view candidate = (last_slash != std::string_view::npos) ? path.substr(last_slash + 1) : path;
+    const auto last_slash = path.rfind('/');
+    const std::string_view candidate = (last_slash != std::string_view::npos) ? path.substr(last_slash + 1) : path;
 
     if (candidate.empty()) {
         return std::string(fallback);
     }
 
-    return sanitize_filename(candidate);
+    // Decode first so that an encoded separator ("%2F") cannot survive sanitizing.
+    return sanitize_filename(percent_decode(candidate));
 }
 
-std::expected<Url, DeoxError> parse_url(std::string_view raw_url) noexcept {
-    // Trim leading and trailing whitespace
-    while (!raw_url.empty() && (raw_url.front() == ' ' || raw_url.front() == '\t')) {
-        raw_url.remove_prefix(1);
-    }
-    while (!raw_url.empty() && (raw_url.back() == ' ' || raw_url.back() == '\t' || raw_url.back() == '\r' || raw_url.back() == '\n')) {
-        raw_url.remove_suffix(1);
+std::string filename_from_content_disposition(std::string_view header_value) noexcept {
+    std::string plain;
+    std::string extended;
+
+    // Split on ';' outside of quoted strings.
+    size_t pos = 0;
+    while (pos <= header_value.size()) {
+        size_t end = pos;
+        bool quoted = false;
+        while (end < header_value.size() && (quoted || header_value[end] != ';')) {
+            if (header_value[end] == '"') quoted = !quoted;
+            if (header_value[end] == '\\' && quoted && end + 1 < header_value.size()) ++end;
+            ++end;
+        }
+        const std::string_view param = trim(header_value.substr(pos, end - pos));
+        pos = end + 1;
+
+        const auto eq = param.find('=');
+        if (eq == std::string_view::npos) continue;
+        const std::string_view name = trim(param.substr(0, eq));
+        std::string_view value = trim(param.substr(eq + 1));
+
+        if (name.size() == 9 && starts_with_icase(name, "filename*")) {
+            // RFC 5987: charset'language'percent-encoded-value
+            const auto first = value.find('\'');
+            const auto second = (first == std::string_view::npos) ? first : value.find('\'', first + 1);
+            if (second != std::string_view::npos) {
+                extended = percent_decode(value.substr(second + 1));
+            }
+        } else if (name.size() == 8 && starts_with_icase(name, "filename")) {
+            if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+                value = value.substr(1, value.size() - 2);
+                plain.clear();
+                for (size_t i = 0; i < value.size(); ++i) {
+                    if (value[i] == '\\' && i + 1 < value.size()) ++i;
+                    plain.push_back(value[i]);
+                }
+            } else {
+                plain = std::string(value);
+            }
+        }
     }
 
+    const std::string& chosen = !extended.empty() ? extended : plain;
+    if (chosen.empty()) {
+        return {};
+    }
+    return sanitize_filename(chosen);
+}
+
+std::string numbered_filename(std::string_view filename, uint32_t number) noexcept {
+    const size_t ext_pos = extension_start(filename);
+    std::string out(filename.substr(0, ext_pos));
+    out += '.';
+    out += std::to_string(number);
+    out += filename.substr(ext_pos);
+    return out;
+}
+
+std::expected<Url, Error> parse_url(std::string_view raw_url) noexcept {
+    raw_url = trim(raw_url);
+
     if (raw_url.empty()) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidUrl, "URL string is empty"});
+        return std::unexpected(Error{ErrorCode::InvalidUrl, "URL is empty"});
+    }
+
+    for (const char ch : raw_url) {
+        const auto byte = static_cast<unsigned char>(ch);
+        if (byte <= 32 || byte == 127) {
+            return std::unexpected(Error{ErrorCode::InvalidUrl, "URL contains whitespace or control characters"});
+        }
     }
 
     Url url;
 
-    // 1. Parse Scheme
+    // 1. Scheme
     constexpr std::string_view scheme_sep = "://";
     const auto scheme_pos = raw_url.find(scheme_sep);
-    if (scheme_pos == std::string_view::npos) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidUrl, "Missing protocol scheme (e.g. 'http://' or 'https://')"});
+    if (scheme_pos == std::string_view::npos || scheme_pos == 0) {
+        return std::unexpected(Error{ErrorCode::InvalidUrl, "Missing scheme: the URL must start with http:// or https://"});
     }
 
-    std::string scheme_str;
-    scheme_str.resize(scheme_pos);
-    std::transform(raw_url.begin(), raw_url.begin() + static_cast<ptrdiff_t>(scheme_pos), scheme_str.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::string scheme_str(raw_url.substr(0, scheme_pos));
+    std::ranges::transform(scheme_str, scheme_str.begin(), ascii_lower);
 
     if (scheme_str == "http") {
-        url.scheme = "http";
         url.port = 80;
     } else if (scheme_str == "https") {
-        url.scheme = "https";
         url.port = 443;
     } else {
-        return std::unexpected(DeoxError{ErrorCode::InvalidUrl, "Unsupported protocol: '" + scheme_str + "'. Only HTTP and HTTPS are supported."});
+        return std::unexpected(Error{ErrorCode::InvalidUrl, "Unsupported scheme '" + scheme_str + "': only http and https are supported"});
     }
+    url.scheme = std::move(scheme_str);
 
+    // 2. Authority: [userinfo@]host[:port], ended by the first '/', '?' or '#'
     std::string_view rest = raw_url.substr(scheme_pos + scheme_sep.size());
-    if (rest.empty()) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidUrl, "Missing host in URL"});
+    const auto authority_end = rest.find_first_of("/?#");
+    std::string_view authority = rest.substr(0, authority_end);
+    rest = (authority_end != std::string_view::npos) ? rest.substr(authority_end) : std::string_view{};
+
+    const auto at_pos = authority.rfind('@');
+    if (at_pos != std::string_view::npos) {
+        url.userinfo = std::string(authority.substr(0, at_pos));
+        authority = authority.substr(at_pos + 1);
     }
 
-    // 2. Parse Host and optional Port
-    const auto path_pos = rest.find('/');
-    std::string_view host_port = (path_pos != std::string_view::npos) ? rest.substr(0, path_pos) : rest;
-    std::string_view path_and_query = (path_pos != std::string_view::npos) ? rest.substr(path_pos) : "/";
+    std::string_view host = authority;
+    std::string_view port_str;
+    bool has_port = false;
 
-    if (host_port.empty()) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidUrl, "Empty host name"});
+    if (!authority.empty() && authority.front() == '[') {
+        // IPv6 literal
+        const auto bracket = authority.find(']');
+        if (bracket == std::string_view::npos) {
+            return std::unexpected(Error{ErrorCode::InvalidUrl, "Unterminated IPv6 address in URL"});
+        }
+        host = authority.substr(0, bracket + 1);
+        const std::string_view after = authority.substr(bracket + 1);
+        if (!after.empty()) {
+            if (after.front() != ':') {
+                return std::unexpected(Error{ErrorCode::InvalidUrl, "Unexpected characters after IPv6 address in URL"});
+            }
+            port_str = after.substr(1);
+            has_port = true;
+        }
+    } else {
+        const auto colon_pos = authority.rfind(':');
+        if (colon_pos != std::string_view::npos) {
+            host = authority.substr(0, colon_pos);
+            port_str = authority.substr(colon_pos + 1);
+            has_port = true;
+        }
     }
 
-    const auto colon_pos = host_port.find(':');
-    if (colon_pos != std::string_view::npos) {
-        url.host = std::string(host_port.substr(0, colon_pos));
-        std::string_view port_str = host_port.substr(colon_pos + 1);
+    if (host.empty() || host == "[]") {
+        return std::unexpected(Error{ErrorCode::InvalidUrl, "URL has no host name"});
+    }
+    url.host = std::string(host);
+
+    if (has_port && !port_str.empty()) {
         uint16_t parsed_port = 0;
         const auto [ptr, ec] = std::from_chars(port_str.data(), port_str.data() + port_str.size(), parsed_port);
         if (ec != std::errc{} || ptr != port_str.data() + port_str.size() || parsed_port == 0) {
-            return std::unexpected(DeoxError{ErrorCode::InvalidUrl, "Invalid port number: '" + std::string(port_str) + "'"});
+            return std::unexpected(Error{ErrorCode::InvalidUrl, "Invalid port number '" + std::string(port_str) + "'"});
         }
         url.port = parsed_port;
-    } else {
-        url.host = std::string(host_port);
     }
 
-    // 3. Parse Path and Query
-    const auto query_pos = path_and_query.find('?');
+    // 3. Path, query; the fragment never reaches the server
+    const auto fragment_pos = rest.find('#');
+    if (fragment_pos != std::string_view::npos) {
+        rest = rest.substr(0, fragment_pos);
+    }
+
+    const auto query_pos = rest.find('?');
     if (query_pos != std::string_view::npos) {
-        url.path = std::string(path_and_query.substr(0, query_pos));
-        url.query = std::string(path_and_query.substr(query_pos + 1));
+        url.path = std::string(rest.substr(0, query_pos));
+        url.query = std::string(rest.substr(query_pos + 1));
     } else {
-        url.path = std::string(path_and_query);
+        url.path = std::string(rest);
     }
 
     if (url.path.empty()) {
@@ -158,4 +327,4 @@ std::expected<Url, DeoxError> parse_url(std::string_view raw_url) noexcept {
     return url;
 }
 
-} // namespace deox::core
+} // namespace deoxdm::core

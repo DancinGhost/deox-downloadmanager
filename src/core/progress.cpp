@@ -1,8 +1,9 @@
-#include "deox/core/progress.hpp"
-#include <numeric>
+// SPDX-License-Identifier: MIT
+#include "deoxdm/core/progress.hpp"
+#include <algorithm>
 #include <cmath>
 
-namespace deox::core {
+namespace deoxdm::core {
 
 double update_ema_speed(double prev_ema, double instantaneous, double alpha) noexcept {
     if (prev_ema <= 0.0) {
@@ -13,12 +14,15 @@ double update_ema_speed(double prev_ema, double instantaneous, double alpha) noe
 
 ProgressSnapshot calculate_progress(
     std::span<const ChunkState> chunks,
-    uint64_t total_bytes,
+    std::optional<uint64_t> total_bytes_opt,
     std::chrono::nanoseconds total_elapsed,
-    double smoothed_speed_bps
+    double smoothed_speed_bps,
+    uint64_t bytes_at_start
 ) noexcept {
     ProgressSnapshot snap;
+    const uint64_t total_bytes = total_bytes_opt.value_or(0);
     snap.total_bytes = total_bytes;
+    snap.size_known = total_bytes_opt.has_value();
     snap.total_chunks = static_cast<uint32_t>(chunks.size());
 
     uint64_t sum_downloaded = 0;
@@ -38,32 +42,28 @@ ProgressSnapshot calculate_progress(
     snap.completed_chunks = completed;
     snap.active_workers = active;
 
-    if (total_bytes > 0) {
-        snap.percentage = (static_cast<double>(sum_downloaded) / static_cast<double>(total_bytes)) * 100.0;
-        if (snap.percentage > 100.0) snap.percentage = 100.0;
-    } else {
-        snap.percentage = 0.0;
+    if (snap.size_known) {
+        snap.percentage = (total_bytes > 0)
+            ? std::min(100.0, static_cast<double>(sum_downloaded) / static_cast<double>(total_bytes) * 100.0)
+            : 100.0;
     }
 
     const double elapsed_seconds = std::chrono::duration<double>(total_elapsed).count();
     if (elapsed_seconds > 0.001) {
-        snap.average_speed_bps = static_cast<double>(sum_downloaded) / elapsed_seconds;
-    } else {
-        snap.average_speed_bps = 0.0;
+        const uint64_t this_run = (sum_downloaded > bytes_at_start) ? (sum_downloaded - bytes_at_start) : 0;
+        snap.average_speed_bps = static_cast<double>(this_run) / elapsed_seconds;
     }
 
     snap.current_speed_bps = (smoothed_speed_bps >= 0.0) ? smoothed_speed_bps : 0.0;
 
-    // Calculate Estimated Time of Arrival (ETA)
+    // Remaining time; left at zero ("unknown") while the speed is too low to be meaningful
     if (total_bytes > sum_downloaded && snap.current_speed_bps > 1024.0) {
         const double bytes_remaining = static_cast<double>(total_bytes - sum_downloaded);
         const double seconds_remaining = bytes_remaining / snap.current_speed_bps;
         snap.estimated_remaining = std::chrono::seconds(static_cast<int64_t>(std::ceil(seconds_remaining)));
-    } else {
-        snap.estimated_remaining = std::chrono::seconds(0);
     }
 
     return snap;
 }
 
-} // namespace deox::core
+} // namespace deoxdm::core

@@ -1,9 +1,9 @@
-#include "deox/core/checksum.hpp"
-#include <cstring>
+// SPDX-License-Identifier: MIT
+#include "deoxdm/core/checksum.hpp"
 #include <algorithm>
-#include <format>
+#include <cstring>
 
-namespace deox::core {
+namespace deoxdm::core {
 
 namespace {
 
@@ -113,6 +113,10 @@ void Sha256::transform(const uint8_t block[64]) noexcept {
 }
 
 void Sha256::update(std::span<const uint8_t> data) noexcept {
+    if (data.empty()) {
+        return;
+    }
+
     size_t offset = 0;
     const size_t len = data.size();
 
@@ -160,7 +164,7 @@ std::array<uint8_t, 32> Sha256::finalize_raw() noexcept {
     std::memset(buffer_.data() + buffer_len_, 0, 56 - buffer_len_);
 
     // Append 64-bit length in big-endian
-    for (int i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
         buffer_[56 + i] = static_cast<uint8_t>((bit_count_ >> ((7 - i) * 8)) & 0xFF);
     }
 
@@ -179,11 +183,13 @@ std::array<uint8_t, 32> Sha256::finalize_raw() noexcept {
 }
 
 std::string Sha256::finalize() noexcept {
+    constexpr std::string_view digits = "0123456789abcdef";
     const auto raw = finalize_raw();
     std::string hex;
     hex.reserve(64);
     for (const uint8_t b : raw) {
-        hex += std::format("{:02x}", b);
+        hex.push_back(digits[b >> 4]);
+        hex.push_back(digits[b & 0x0F]);
     }
     return hex;
 }
@@ -200,26 +206,41 @@ std::string compute_sha256(std::string_view data) noexcept {
     return hasher.finalize();
 }
 
-bool verify_sha256(std::string_view computed_hex, std::string_view expected_hex) noexcept {
-    // Trim whitespace
-    while (!expected_hex.empty() && (expected_hex.front() == ' ' || expected_hex.front() == '\t')) {
-        expected_hex.remove_prefix(1);
-    }
-    while (!expected_hex.empty() && (expected_hex.back() == ' ' || expected_hex.back() == '\t' || expected_hex.back() == '\r' || expected_hex.back() == '\n')) {
-        expected_hex.remove_suffix(1);
-    }
+namespace {
 
-    if (computed_hex.size() != 64 || expected_hex.size() != 64) {
+constexpr std::string_view trim_hex(std::string_view s) noexcept {
+    constexpr auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (!s.empty() && is_space(s.front())) s.remove_prefix(1);
+    while (!s.empty() && is_space(s.back())) s.remove_suffix(1);
+    return s;
+}
+
+constexpr bool is_hex_digit(char c) noexcept {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+constexpr char lower_hex(char c) noexcept {
+    return (c >= 'A' && c <= 'F') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+} // namespace
+
+bool is_valid_sha256_hex(std::string_view hex) noexcept {
+    hex = trim_hex(hex);
+    return hex.size() == 64 && std::ranges::all_of(hex, is_hex_digit);
+}
+
+bool verify_sha256(std::string_view computed_hex, std::string_view expected_hex) noexcept {
+    computed_hex = trim_hex(computed_hex);
+    expected_hex = trim_hex(expected_hex);
+
+    if (!is_valid_sha256_hex(computed_hex) || !is_valid_sha256_hex(expected_hex)) {
         return false;
     }
 
-    for (size_t i = 0; i < 64; ++i) {
-        const auto c1 = static_cast<char>(std::tolower(static_cast<unsigned char>(computed_hex[i])));
-        const auto c2 = static_cast<char>(std::tolower(static_cast<unsigned char>(expected_hex[i])));
-        if (c1 != c2) return false;
-    }
-
-    return true;
+    return std::ranges::equal(computed_hex, expected_hex, [](char a, char b) {
+        return lower_hex(a) == lower_hex(b);
+    });
 }
 
-} // namespace deox::core
+} // namespace deoxdm::core

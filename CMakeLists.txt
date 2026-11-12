@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(deox 
-    VERSION 1.0.0 
-    DESCRIPTION "High-performance, memory-safe download manager in modern C++23 (Functional Core, Imperative Shell)"
+
+# The version lives in one place: include/deoxdm/version.hpp
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/deoxdm/version.hpp" _deoxdm_version_line REGEX "VERSION_STRING = \"")
+string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" DEOXDM_VERSION "${_deoxdm_version_line}")
+
+project(deox_downloadmanager
+    VERSION ${DEOXDM_VERSION}
+    DESCRIPTION "Deox Download Manager: segmented, resumable HTTP(S) download manager"
     HOMEPAGE_URL "https://github.com/DancinGhost/deox-downloadmanager"
     LANGUAGES CXX
 )
@@ -11,101 +16,90 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+# All programs end up directly in the build directory:
+# build/deox-dm, build/deox-dm-gui, build/deoxdm_tests, ...
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
 option(BUILD_TESTING "Build the test suite" ON)
+option(DEOXDM_BUILD_CLI "Build the command line program (deox-dm)" ON)
+set(DEOXDM_BUILD_GUI "AUTO" CACHE STRING "Build the Qt 6 desktop application (deox-dm-gui): ON, OFF or AUTO (only if Qt 6 is found)")
+set_property(CACHE DEOXDM_BUILD_GUI PROPERTY STRINGS AUTO ON OFF)
+option(DEOXDM_ENABLE_ASAN "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(DEOXDM_ENABLE_TSAN "Build with ThreadSanitizer" OFF)
 
-# Compiler warning flags
-if(MSVC)
-    add_compile_options(/W4 /permissive-)
-else()
-    add_compile_options(
-        -Wall 
-        -Wextra 
-        -Wpedantic 
-        -Wshadow 
-        -Wconversion 
-        -Wnon-virtual-dtor 
-        -Wcast-align 
-        -Wunused 
-        -Woverloaded-virtual
-    )
-    if(ENABLE_ASAN)
-        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=address,undefined)
-    endif()
+# Backward-compatibility option aliases
+if(ENABLE_ASAN)
+    set(DEOXDM_ENABLE_ASAN ON)
+endif()
+if(ENABLE_TSAN)
+    set(DEOXDM_ENABLE_TSAN ON)
 endif()
 
-# Find libcurl or link directly against libcurl.so.4 on Linux
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(DeoxdmCompilerOptions)
+include(DeoxdmPlatform)
+include(GNUInstallDirs)
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+find_package(Threads REQUIRED)
+
+# libcurl: only the runtime library is required. The network layer declares
+# the few libcurl functions it calls itself (src/net/curl_abi.hpp), so the
+# development package is optional on Linux.
 find_package(CURL QUIET)
-
-# Functional Core Library (Zero external dependencies, pure domain logic)
-add_library(deox_core STATIC
-    src/core/url.cpp
-    src/core/chunk_planner.cpp
-    src/core/progress.cpp
-    src/core/state_machine.cpp
-    src/core/checkpoint.cpp
-    src/core/checksum.cpp
-    src/core/formatting.cpp
-)
-
-target_include_directories(deox_core PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-
-# Imperative Shell Library (I/O, OS, Network, Disk, Terminal)
-add_library(deox_shell STATIC
-    src/shell/file_writer.cpp
-    src/shell/checkpoint_io.cpp
-    src/shell/curl_wrapper.cpp
-    src/shell/network_client.cpp
-    src/shell/engine.cpp
-    src/shell/terminal_ui.cpp
-)
-
-target_include_directories(deox_shell PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-
-target_link_libraries(deox_shell PUBLIC deox_core)
-
-# Link curl: use CMake target if found, otherwise link libcurl.so.4
 if(TARGET CURL::libcurl)
-    target_link_libraries(deox_shell PRIVATE CURL::libcurl)
+    set(DEOXDM_CURL_LIBRARY CURL::libcurl)
 else()
-    find_library(CURL_LIB NAMES curl libcurl libcurl.so.4 PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib)
-    if(CURL_LIB)
-        target_link_libraries(deox_shell PRIVATE ${CURL_LIB})
+    find_library(DEOXDM_CURL_LIBRARY NAMES curl libcurl libcurl.so.4 libcurl-gnutls.so.4)
+    if(NOT DEOXDM_CURL_LIBRARY)
+        message(FATAL_ERROR "libcurl was not found. Install it, e.g. 'apt install libcurl4' or 'dnf install libcurl'.")
+    endif()
+endif()
+message(STATUS "Using libcurl: ${DEOXDM_CURL_LIBRARY}")
+
+# ---------------------------------------------------------------------------
+# Libraries (src/) and programs (apps/)
+# ---------------------------------------------------------------------------
+add_subdirectory(src)
+
+if(DEOXDM_BUILD_CLI OR BUILD_TESTING)
+    add_subdirectory(apps/cli)
+endif()
+
+set(DEOXDM_GUI_ENABLED OFF)
+if(NOT DEOXDM_BUILD_GUI STREQUAL "OFF")
+    find_package(Qt6 6.4 QUIET COMPONENTS Widgets)
+    if(Qt6_FOUND)
+        set(DEOXDM_GUI_ENABLED ON)
+        add_subdirectory(apps/gui)
+    elseif(DEOXDM_BUILD_GUI STREQUAL "ON")
+        message(FATAL_ERROR "DEOXDM_BUILD_GUI=ON but Qt 6 Widgets was not found. Install it, e.g. 'apt install qt6-base-dev'.")
     else()
-        target_link_libraries(deox_shell PRIVATE -l:libcurl.so.4)
+        message(STATUS "Qt 6 Widgets not found: the desktop application (deox-dm-gui) will not be built")
     endif()
 endif()
 
-# Main CLI Executable
-add_executable(deox src/main.cpp)
-target_link_libraries(deox PRIVATE deox_shell)
-
-# Tests
 if(BUILD_TESTING)
     enable_testing()
-    add_executable(deox_tests
-        tests/test_main.cpp
-        tests/test_url.cpp
-        tests/test_chunk_planner.cpp
-        tests/test_progress.cpp
-        tests/test_state_machine.cpp
-        tests/test_checkpoint.cpp
-        tests/test_checksum.cpp
-        tests/test_formatting.cpp
-        tests/test_file_writer.cpp
-        tests/test_integration.cpp
-    )
-    target_link_libraries(deox_tests PRIVATE deox_shell)
-    add_test(NAME deox_all_tests COMMAND deox_tests)
+    add_subdirectory(tests)
 endif()
 
-# Install rules
-include(GNUInstallDirs)
-install(TARGETS deox RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# Desktop integration files (Linux/BSD desktops following freedesktop.org)
+if(DEOXDM_GUI_ENABLED AND UNIX AND NOT APPLE)
+    install(FILES packaging/linux/io.github.DancinGhost.DeoxDownloadManager.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES packaging/linux/io.github.DancinGhost.DeoxDownloadManager.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+endif()
+
+message(STATUS "Deox Download Manager ${PROJECT_VERSION}: platform backend '${DEOXDM_PLATFORM_BACKEND}', "
+               "CLI ${DEOXDM_BUILD_CLI}, GUI ${DEOXDM_GUI_ENABLED}, tests ${BUILD_TESTING}")

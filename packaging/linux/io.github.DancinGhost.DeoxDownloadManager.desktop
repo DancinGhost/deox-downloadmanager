@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Deox Download Manager
+GenericName=Download Manager
+Comment=Download files over several connections, with pause and resume
+Exec=deox-dm-gui %U
+Icon=io.github.DancinGhost.DeoxDownloadManager
+Terminal=false
+Categories=Network;FileTransfer;Qt;
+Keywords=download;downloader;http;https;resume;
+StartupWMClass=deox-dm-gui

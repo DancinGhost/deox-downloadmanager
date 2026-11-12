@@ -27,7 +27,7 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev cmake ninja-build
+        sudo apt-get install -y libcurl4-openssl-dev qt6-base-dev cmake ninja-build
 
     - name: Configure CMake
       run: |
@@ -35,11 +35,11 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
           -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-          -DENABLE_ASAN=ON \
+          -DDEOXDM_ENABLE_ASAN=ON \
           -DBUILD_TESTING=ON
 
     - name: Build
       run: cmake --build build --parallel
 
     - name: Run Test Suite
-      run: ./build/deox_tests
+      run: ctest --test-dir build --output-on-failure

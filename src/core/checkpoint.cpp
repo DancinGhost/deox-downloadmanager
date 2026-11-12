@@ -1,10 +1,16 @@
-#include "deox/core/checkpoint.hpp"
-#include <sstream>
-#include <charconv>
+// SPDX-License-Identifier: MIT
+#include "deoxdm/core/checkpoint.hpp"
+#include "deoxdm/core/chunk_planner.hpp"
 
-namespace deox::core {
+#include <charconv>
+#include <format>
+#include <optional>
+
+namespace deoxdm::core {
 
 namespace {
+
+constexpr size_t kMaxCheckpointChunks = 4096;
 
 std::string_view trim_line(std::string_view line) noexcept {
     while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
@@ -26,28 +32,25 @@ std::optional<T> parse_uint(std::string_view sv) noexcept {
     return std::nullopt;
 }
 
+std::unexpected<Error> corrupted(std::string message) {
+    return std::unexpected(Error{ErrorCode::StateCorrupted, std::move(message)});
+}
+
 } // namespace
 
-std::string serialize_checkpoint(
-    const std::string& url,
-    uint64_t total_size,
-    const std::string& etag,
-    const std::string& last_modified,
-    const std::string& output_filename,
-    std::span<const ChunkState> chunks
-) noexcept {
+std::string serialize_checkpoint(const ResumeData& data) noexcept {
     std::string out;
-    out.reserve(256 + chunks.size() * 64);
+    out.reserve(256 + data.url.size() + data.chunks.size() * 64);
 
-    out += "# DEOX DOWNLOAD CHECKPOINT v1\n";
-    out += "url=" + url + "\n";
-    out += "total_size=" + std::to_string(total_size) + "\n";
-    out += "etag=" + etag + "\n";
-    out += "last_modified=" + last_modified + "\n";
-    out += "output_file=" + output_filename + "\n";
-    out += "chunks_count=" + std::to_string(chunks.size()) + "\n";
+    out += "# DEOX DOWNLOAD MANAGER CHECKPOINT v1\n";
+    out += "url=" + data.url + "\n";
+    out += "total_size=" + std::to_string(data.total_size) + "\n";
+    out += "etag=" + data.etag + "\n";
+    out += "last_modified=" + data.last_modified + "\n";
+    out += "output_file=" + data.output_file + "\n";
+    out += "chunks_count=" + std::to_string(data.chunks.size()) + "\n";
 
-    for (const auto& ch : chunks) {
+    for (const auto& ch : data.chunks) {
         out += std::format("chunk={},{},{},{},{}\n",
             ch.index,
             ch.range.start_byte,
@@ -60,26 +63,21 @@ std::string serialize_checkpoint(
     return out;
 }
 
-std::expected<ResumeData, DeoxError> deserialize_checkpoint(std::string_view content) noexcept {
-    if (content.empty()) {
-        return std::unexpected(DeoxError{ErrorCode::StateCorrupted, "Checkpoint file is empty"});
-    }
-
+std::expected<ResumeData, Error> deserialize_checkpoint(std::string_view content) noexcept {
     ResumeData data;
-    size_t expected_chunks = 0;
+    std::optional<size_t> expected_chunks;
     bool has_url = false;
     bool has_total_size = false;
 
     size_t pos = 0;
     while (pos < content.size()) {
         const size_t end_line = content.find('\n', pos);
-        std::string_view line = (end_line != std::string_view::npos) ? 
-            content.substr(pos, end_line - pos) : content.substr(pos);
+        std::string_view line = content.substr(pos, end_line == std::string_view::npos ? end_line : end_line - pos);
         pos = (end_line != std::string_view::npos) ? end_line + 1 : content.size();
 
         line = trim_line(line);
         if (line.empty() || line.front() == '#') {
-            continue; // Skip comments and empty lines
+            continue;
         }
 
         const size_t eq_pos = line.find('=');
@@ -92,14 +90,12 @@ std::expected<ResumeData, DeoxError> deserialize_checkpoint(std::string_view con
 
         if (key == "url") {
             data.url = std::string(val);
-            has_url = true;
+            has_url = !val.empty();
         } else if (key == "total_size") {
-            if (auto sz = parse_uint<uint64_t>(val)) {
-                data.total_size = *sz;
-                has_total_size = true;
-            } else {
-                return std::unexpected(DeoxError{ErrorCode::StateCorrupted, "Invalid total_size in checkpoint"});
-            }
+            const auto size = parse_uint<uint64_t>(val);
+            if (!size) return corrupted("Checkpoint has an invalid total_size");
+            data.total_size = *size;
+            has_total_size = true;
         } else if (key == "etag") {
             data.etag = std::string(val);
         } else if (key == "last_modified") {
@@ -107,84 +103,100 @@ std::expected<ResumeData, DeoxError> deserialize_checkpoint(std::string_view con
         } else if (key == "output_file") {
             data.output_file = std::string(val);
         } else if (key == "chunks_count") {
-            if (auto cnt = parse_uint<size_t>(val)) {
-                expected_chunks = *cnt;
-                data.chunks.reserve(expected_chunks);
-            }
+            const auto count = parse_uint<size_t>(val);
+            if (!count) return corrupted("Checkpoint has an invalid chunks_count");
+            expected_chunks = *count;
         } else if (key == "chunk") {
             // chunk=index,start,end,downloaded,status
-            std::vector<std::string_view> parts;
-            size_t c_pos = 0;
-            while (c_pos < val.size()) {
-                size_t comma = val.find(',', c_pos);
-                if (comma != std::string_view::npos) {
-                    parts.push_back(val.substr(c_pos, comma - c_pos));
-                    c_pos = comma + 1;
-                } else {
-                    parts.push_back(val.substr(c_pos));
-                    break;
+            std::string_view parts[5];
+            std::string_view remaining = val;
+            for (size_t i = 0; i < 5; ++i) {
+                const size_t comma = remaining.find(',');
+                const bool last = (i == 4);
+                if ((comma == std::string_view::npos) != last) {
+                    return corrupted("Checkpoint has a malformed chunk record");
                 }
+                parts[i] = remaining.substr(0, comma);
+                if (!last) remaining.remove_prefix(comma + 1);
             }
 
-            if (parts.size() != 5) {
-                return std::unexpected(DeoxError{ErrorCode::StateCorrupted, "Malformed chunk line in checkpoint"});
-            }
-
-            auto idx = parse_uint<uint32_t>(parts[0]);
-            auto start = parse_uint<uint64_t>(parts[1]);
-            auto end = parse_uint<uint64_t>(parts[2]);
-            auto downloaded = parse_uint<uint64_t>(parts[3]);
-            auto status = chunk_status_from_string(parts[4]);
+            const auto idx = parse_uint<uint32_t>(parts[0]);
+            const auto start = parse_uint<uint64_t>(parts[1]);
+            const auto end = parse_uint<uint64_t>(parts[2]);
+            const auto downloaded = parse_uint<uint64_t>(parts[3]);
+            const auto status = chunk_status_from_string(parts[4]);
 
             if (!idx || !start || !end || !downloaded || !status) {
-                return std::unexpected(DeoxError{ErrorCode::StateCorrupted, "Invalid values in chunk record"});
+                return corrupted("Checkpoint has invalid values in a chunk record");
             }
-
-            ChunkStatus ch_status = *status;
-            // If it was marked downloading before crash, reset to pending
-            if (ch_status == ChunkStatus::Downloading) {
-                ch_status = ChunkStatus::Pending;
+            if (data.chunks.size() >= kMaxCheckpointChunks) {
+                return corrupted("Checkpoint lists too many chunks");
             }
 
             data.chunks.push_back(ChunkState{
                 .index = *idx,
                 .range = ByteRange{*start, *end},
                 .bytes_downloaded = *downloaded,
-                .status = ch_status
+                .status = *status
             });
         }
     }
 
     if (!has_url || !has_total_size) {
-        return std::unexpected(DeoxError{ErrorCode::StateCorrupted, "Checkpoint missing essential url or total_size"});
+        return corrupted("Checkpoint is missing the url or total_size field");
+    }
+    if (expected_chunks && data.chunks.size() != *expected_chunks) {
+        return corrupted("Checkpoint is truncated: chunk count does not match");
+    }
+    if (data.total_size == 0 || data.chunks.empty()) {
+        return corrupted("Checkpoint does not describe any data");
     }
 
-    if (expected_chunks > 0 && data.chunks.size() != expected_chunks) {
-        return std::unexpected(DeoxError{ErrorCode::StateCorrupted, "Checkpoint chunk count mismatch"});
+    const ChunkPlan as_plan{.chunks = data.chunks, .total_size = data.total_size, .size_known = true, .is_segmented = data.chunks.size() > 1};
+    if (!verify_chunk_plan(as_plan)) {
+        return corrupted("Checkpoint chunks do not cover the file exactly");
+    }
+
+    for (auto& chunk : data.chunks) {
+        if (chunk.bytes_downloaded > chunk.range.length()) {
+            return corrupted("Checkpoint chunk claims more bytes than it spans");
+        }
+        // The stored status only reflects what a worker was doing when the
+        // checkpoint was written. What matters for resuming is the byte count:
+        // anything unfinished, including a failed chunk, must be fetched again.
+        chunk.status = chunk.is_complete() ? ChunkStatus::Completed : ChunkStatus::Pending;
     }
 
     return data;
 }
 
-std::expected<void, DeoxError> validate_resume_compatibility(
+std::expected<void, Error> validate_resume_compatibility(
     const ResumeData& resume,
-    const std::string& current_url,
-    uint64_t current_size,
-    std::string_view current_etag
+    std::string_view current_url,
+    const RemoteFileInfo& remote
 ) noexcept {
     if (resume.url != current_url) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidArgument, "Checkpoint URL does not match current target URL"});
+        return std::unexpected(Error{ErrorCode::InvalidArgument, "Checkpoint was created for a different URL"});
     }
 
-    if (resume.total_size != current_size) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidArgument, "Remote file size has changed since checkpoint was created"});
+    if (!remote.accepts_ranges) {
+        return std::unexpected(Error{ErrorCode::RangeNotSupported, "Server does not support range requests, cannot resume"});
     }
 
-    if (!resume.etag.empty() && !current_etag.empty() && resume.etag != current_etag) {
-        return std::unexpected(DeoxError{ErrorCode::InvalidArgument, "Remote file ETag changed; file was modified on server"});
+    if (!remote.content_length || *remote.content_length != resume.total_size) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, "Remote file size changed since the checkpoint was created"});
+    }
+
+    if (!resume.etag.empty() && !remote.etag.empty()) {
+        if (resume.etag != remote.etag) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument, "Remote file changed since the checkpoint was created (ETag differs)"});
+        }
+    } else if (!resume.last_modified.empty() && !remote.last_modified.empty() &&
+               resume.last_modified != remote.last_modified) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, "Remote file changed since the checkpoint was created (Last-Modified differs)"});
     }
 
     return {};
 }
 
-} // namespace deox::core
+} // namespace deoxdm::core
