@@ -20,9 +20,9 @@ jobs:
             cc: gcc-14
             packages: g++-14 gcc-14
           - compiler: clang
-            cxx: clang++-18
-            cc: clang-18
-            packages: clang-18 llvm-18 g++-14 libstdc++-14-dev
+            cxx: clang++-19
+            cc: clang-19
+            packages: clang-19 llvm-19 g++-14 libstdc++-14-dev
 
     steps:
     - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
           -DBUILD_TESTING=ON
 
     - name: Build
-      run: cmake --build build --parallel
+      run: cmake --build build --verbose
 
     - name: Run Test Suite
       run: ctest --test-dir build --output-on-failure
