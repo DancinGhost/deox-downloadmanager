@@ -101,22 +101,21 @@ jobs:
       run: |
         mkdir -p dist
         cmake --install build --strip --prefix "$PWD/stage/$PACKAGE"
-        ./stage/$PACKAGE/bin/deox-dm --version
+        ./stage/$PACKAGE/bin/deox-dm --help
         tar -C stage -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
         (cd dist && sha256sum -- * > SHA256SUMS)
         cat dist/SHA256SUMS
 
     - name: Write release notes
       run: |
-        version=$(sed -n 's/.*VERSION_STRING = "\(.*\)".*/\1/p' include/deoxdm/version.hpp)
         {
-          echo "Automated canary build of \`$version\` from commit ${GITHUB_SHA::7} on \`main\`."
+          echo "Automated canary build of commit ${GITHUB_SHA::7} on \`main\`."
           echo
           echo "- Commit: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
           echo "- Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo
           echo "This prerelease is replaced on every push to \`main\`. It passed the test suite"
-          echo "but is otherwise untested; use a tagged release for anything important."
+          echo "but is otherwise untested."
           echo
           echo "Built on Ubuntu 24.04 (glibc 2.39). Needs the system's libcurl (\`libcurl4\`) and,"
           echo "for \`deox-dm-gui\`, Qt 6 (\`libqt6widgets6\`)."
@@ -124,7 +123,7 @@ jobs:
           echo '```'
           echo "sha256sum -c SHA256SUMS"
           echo "tar -xzf $PACKAGE.tar.gz"
-          echo "./$PACKAGE/bin/deox-dm --version"
+          echo "./$PACKAGE/bin/deox-dm --help"
           echo '```'
         } > notes.md
 

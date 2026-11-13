@@ -109,7 +109,7 @@ curl -LO https://github.com/DancinGhost/deox-downloadmanager/releases/download/c
 curl -LO https://github.com/DancinGhost/deox-downloadmanager/releases/download/canary/SHA256SUMS
 sha256sum -c SHA256SUMS
 tar -xzf deox-dm-canary-linux-x86_64.tar.gz
-./deox-dm-canary-linux-x86_64/bin/deox-dm --version
+./deox-dm-canary-linux-x86_64/bin/deox-dm --help
 ```
 
 Canary builds are untested beyond CI. They are built on Ubuntu 24.04 (glibc 2.39) and need the system's `libcurl4` and, for the GUI, Qt 6 (`libqt6widgets6`).
