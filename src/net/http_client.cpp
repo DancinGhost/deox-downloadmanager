@@ -4,6 +4,7 @@
 #include "deoxdm/core/url.hpp"
 #include "curl_easy.hpp"
 
+#include <algorithm>
 #include <format>
 #include <optional>
 
@@ -14,17 +15,77 @@ namespace {
 using core::Error;
 using core::ErrorCode;
 
+constexpr uint32_t kMaxRedirects = 10;
+
+constexpr bool is_redirect(uint32_t status) noexcept {
+    return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+}
+
+bool same_origin(const core::Url& a, const core::Url& b) noexcept {
+    const auto lower = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; };
+    return a.scheme == b.scheme && a.port == b.port &&
+           std::ranges::equal(a.host, b.host, {}, lower, lower);
+}
+
 void apply_common_options(CurlEasy& curl, const core::DownloadConfig& config) {
-    curl.set_url(config.url);
-    curl.set_follow_redirects(10);
     curl.set_connect_timeout(config.timeout_seconds);
     curl.set_ssl_verify(!config.allow_insecure_tls);
     curl.set_fail_on_error(true);
     if (!config.user_agent.empty()) {
         curl.set_user_agent(config.user_agent);
     }
-    if (!config.headers.empty()) {
-        curl.set_headers(config.headers);
+}
+
+// Runs the request for config.url and follows redirects by hand.
+//
+// libcurl's own redirect handling sends every custom header to whichever host
+// a redirect points at (it only holds back Authorization and Cookie), and lets
+// an https download continue over plain http. Here the custom headers only go
+// to the origin the user named, and an https URL never leads to an http one.
+//
+// The write callback sees the bodies of redirect responses too; it has to
+// pass them over (see is_redirect()).
+std::expected<void, Error> perform_following_redirects(CurlEasy& curl, const core::DownloadConfig& config) {
+    auto origin = core::parse_url(config.url);
+    if (!origin) {
+        return std::unexpected(origin.error());
+    }
+
+    std::string url = config.url;
+    bool at_origin = true;
+
+    for (uint32_t redirects = 0;; ++redirects) {
+        curl.set_url(url);
+        if (!config.headers.empty()) {
+            curl.set_headers(at_origin ? config.headers : std::vector<std::string>{});
+        }
+
+        if (auto result = curl.perform(); !result) {
+            return result;
+        }
+
+        const uint32_t status = curl.response_code();
+        std::string next = curl.redirect_url();
+        if (!is_redirect(status) || next.empty()) {
+            return {};
+        }
+        if (redirects >= kMaxRedirects) {
+            return std::unexpected(Error{ErrorCode::HttpError,
+                std::format("Too many redirects (more than {})", kMaxRedirects), status});
+        }
+
+        auto target = core::parse_url(next);
+        if (!target) {
+            return std::unexpected(Error{ErrorCode::InvalidUrl,
+                std::format("Server redirected to an unusable address: {}", target.error().message), status});
+        }
+        if (origin->scheme == "https" && target->scheme != "https") {
+            return std::unexpected(Error{ErrorCode::InvalidUrl,
+                "Refusing to follow a redirect from https to unencrypted http", status});
+        }
+
+        at_origin = same_origin(*origin, *target);
+        url = std::move(next);
     }
 }
 
@@ -57,6 +118,9 @@ std::expected<HeaderProbe, Error> fetch_headers(
     if (ranged_get) {
         curl.set_range("0-0");
         curl.set_write_callback([&](std::span<const uint8_t> data) -> size_t {
+            if (is_redirect(probe.headers.status)) {
+                return data.size(); // the body of a redirect; the next request follows it
+            }
             if (probe.headers.status == 206) {
                 return data.size(); // the single requested byte
             }
@@ -69,7 +133,7 @@ std::expected<HeaderProbe, Error> fetch_headers(
         curl.set_nobody(true);
     }
 
-    const auto result = curl.perform();
+    const auto result = perform_following_redirects(curl, config);
     if (stop_token.stop_requested()) {
         return std::unexpected(Error{ErrorCode::Cancelled, "Cancelled while contacting the server"});
     }
@@ -213,6 +277,10 @@ std::expected<void, Error> HttpClient::download_chunk(
             return 0;
         }
 
+        if (is_redirect(headers.status)) {
+            return data.size(); // the body of a redirect; the next request follows it
+        }
+
         if (!response_checked) {
             response_checked = true;
             const uint32_t status = headers.status;
@@ -246,7 +314,7 @@ std::expected<void, Error> HttpClient::download_chunk(
         return data.size();
     });
 
-    const auto result = curl.perform();
+    const auto result = perform_following_redirects(curl, config);
 
     if (failure) {
         return std::unexpected(std::move(*failure));

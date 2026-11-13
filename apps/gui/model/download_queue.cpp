@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "download_queue.hpp"
+#include "model/download_queue.hpp"
 
 #include <QDir>
 #include <QFileInfo>

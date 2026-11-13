@@ -1,24 +1,24 @@
 # Deox Download Manager (`deox-downloadmanager`)
 
-[![CI](https://github.com/DancinGhost/deox-downloadmanager/actions/workflows/ci.yml/badge.svg)](https://github.com/DancinGhost/deox-downloadmanager/actions/workflows/ci.yml)
+[![Canary](https://github.com/DancinGhost/deox-downloadmanager/actions/workflows/canary.yml/badge.svg)](https://github.com/DancinGhost/deox-downloadmanager/actions/workflows/canary.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Standard](https://img.shields.io/badge/C%2B%2B-23-orange.svg)](https://en.wikipedia.org/wiki/C%2B%2B23)
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux%20%7C%20Cross--Platform-lightgrey.svg)](docs/PLATFORMS.md)
 
-> **Deox Download Manager** is a blazingly fast, memory-safe, multi-connection segmented download manager written in modern C++23 using the **Functional Core, Imperative Shell (FCIS)** architecture. Designed with a clean cross-platform abstraction layer, cleanroom MIT licensing, and zero viral copyleft dependencies.
+> **Deox Download Manager** is a blazingly fast, memory-safe, multi-connection segmented download manager written in modern C++23 using the **Functional Core, Imperative Shell (FCIS)** architecture. Designed with a clean cross-platform abstraction layer, MIT licensing, and no statically linked copyleft dependencies.
 
 ---
 
 ## 📸 Interface Previews
 
-### Terminal CLI (`deox-dm`)
-<p align="center">
-  <img src="assets/terminal-preview.svg" alt="Deox Download Manager CLI Terminal Demo" width="850">
-</p>
-
 ### Desktop Application (`deox-dm-gui` with Qt 6)
 <p align="center">
   <img src="assets/gui-preview.png" alt="Deox Download Manager Desktop GUI Preview" width="850">
+</p>
+
+### Terminal CLI (`deox-dm`)
+<p align="center">
+  <img src="assets/terminal-preview.svg" alt="Deox Download Manager CLI Terminal Demo" width="850">
 </p>
 
 ---
@@ -37,7 +37,7 @@ In recent years, the systems programming community has witnessed a surge of CLI 
 | **File I/O Throughput** | Multi-threaded file writes | Lock-free concurrent positional writes (`pwrite(2)` / Win32 `OVERLAPPED`) |
 | **Disk Allocation** | Varies by implementation | Zero-fragmentation preallocation (`posix_fallocate(2)` / sparse fallback) |
 | **Hidden Mechanisms** | Hidden async poll loops, large runtime crates | **Zero hidden mechanisms**: completely explicit, deterministic, transparent |
-| **Licensing** | Varies (often depends on GPL crates) | **100% Permissive MIT License** (cleanroom, zero GPLv3 contamination) |
+| **Licensing** | Varies by project | **MIT License**; copyleft libraries (Qt 6, LGPL) only via dynamic linking |
 
 ---
 
@@ -67,24 +67,23 @@ Deox strictly separates pure business logic from side-effectful I/O into a modul
 ```
 
 1. **`deoxdm_core` (Functional Core)**: Pure domain logic without any filesystem or network I/O. Referentially transparent functions returning monadic `std::expected<T, Error>`.
-2. **`deoxdm_platform` (Platform Abstraction)**: Clean portability layer abstracting positional file I/O (`platform::File`), atomic file commits, and terminal capabilities (`platform::Terminal`). Supports Linux (Tier 1) and includes an experimental Windows backend. See [docs/PLATFORMS.md](docs/PLATFORMS.md).
+2. **`deoxdm_platform` (Platform Abstraction)**: The only code that talks to the operating system: positional file I/O (`platform::File`), atomic file commits, UTF-8 path conversion, terminal capabilities and Ctrl-C handling. Linux is supported; a Windows backend is drafted. See [docs/PLATFORMS.md](docs/PLATFORMS.md).
 3. **`deoxdm_net` (Network Layer)**: Robust HTTP client built on libcurl with capability probing, range verification, stall timeouts, and retry policies.
 4. **`deoxdm_engine` (Engine & Concurrency)**: Multi-worker thread orchestration, token-bucket bandwidth rate limiter, and atomic checkpoint persistence (`.deoxdm`).
 5. **Applications (`apps/`)**:
    - `apps/cli/`: The `deox-dm` terminal client with interactive ANSI dashboard and plain milestone logging for scripts and CI.
-   - `apps/gui/`: The `deox-dm-gui` desktop client powered by Qt 6 Widgets with queue management and desktop integration.
+   - `apps/gui/`: The `deox-dm-gui` desktop client powered by Qt 6 Widgets with queue management and desktop integration (`model/` for state, `views/` for widgets).
 
 For a deeper dive into the architecture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## ⚖️ Cleanroom Licensing & Copyright Safety
+## ⚖️ Licensing & Dependencies
 
-Deox Download Manager was authored completely cleanroom from first principles:
-- **Zero GPL Contamination**: Unlike legacy tools such as `aria2` or `wget` (which are licensed under GPLv3), Deox Download Manager is licensed under the permissive **MIT License**.
-- **Commercial & Open Source Friendly**: Can be embedded, packaged, and distributed in proprietary or open-source ecosystems without copyleft obligations.
-- **SPDX Standard Compliant**: Licensing annotations (`SPDX-License-Identifier: MIT`) throughout all source headers.
-- **PII & Trademark Clean**: Free of personally identifiable information and proprietary trademark infringements.
+- **MIT License**: Deox Download Manager's own code is licensed under the permissive [MIT License](LICENSE), with `SPDX-License-Identifier: MIT` headers in its source and build files.
+- **No vendored third-party code**: the repository contains only original code. Run-time libraries and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Copyleft only through dynamic linking**: libcurl (curl license, MIT-style) is used by every program. The optional desktop application uses Qt 6 under the LGPL-3.0, linked dynamically so that users can replace it. The build refuses a static Qt 6 unless `-DDEOXDM_ALLOW_STATIC_COPYLEFT=ON` is set.
+- **Redistributing binaries**: if you bundle libcurl, Qt, or a TLS library with a build, ship their notices along with it as described in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -98,6 +97,22 @@ Deox Download Manager was authored completely cleanroom from first principles:
 - ⏱️ **Shared Rate Limiting**: Global bandwidth throttling across all concurrent connection streams.
 - 🖥️ **Dual Interfaces**: Choose between the powerful CLI (`deox-dm`) or the modern Qt 6 Desktop application (`deox-dm-gui`).
 - 🧪 **100% ASan & UBSan Clean**: Verified against AddressSanitizer and UndefinedBehaviorSanitizer with zero memory leaks and zero undefined behavior.
+
+---
+
+## 📦 Canary Builds
+
+Every push to `main` that passes the test suite is published as the rolling [`canary` prerelease](https://github.com/DancinGhost/deox-downloadmanager/releases/tag/canary). The archive contains `deox-dm`, `deox-dm-gui`, the desktop entry, the icon and the license texts.
+
+```bash
+curl -LO https://github.com/DancinGhost/deox-downloadmanager/releases/download/canary/deox-dm-canary-linux-x86_64.tar.gz
+curl -LO https://github.com/DancinGhost/deox-downloadmanager/releases/download/canary/SHA256SUMS
+sha256sum -c SHA256SUMS
+tar -xzf deox-dm-canary-linux-x86_64.tar.gz
+./deox-dm-canary-linux-x86_64/bin/deox-dm --version
+```
+
+Canary builds are untested beyond CI. They are built on Ubuntu 24.04 (glibc 2.39) and need the system's `libcurl4` and, for the GUI, Qt 6 (`libqt6widgets6`).
 
 ---
 
@@ -134,6 +149,10 @@ cmake --build build-asan -j$(nproc)
 ctest --test-dir build-asan --output-on-failure
 ```
 
+### Hardening
+
+Builds include exploit mitigations by default: `-fstack-protector-strong`, stack clash and control-flow protection where the compiler supports them, `_FORTIFY_SOURCE=3` in optimized builds without sanitizers, position-independent executables and, on Linux, full RELRO. Pass `-DDEOXDM_ENABLE_HARDENING=OFF` to leave them out.
+
 ---
 
 ## 📖 CLI Usage (`deox-dm`)
@@ -163,7 +182,11 @@ Transfer:
                              after SEC seconds; 0 disables the timeout (default: 30)
   -r, --retries <NUM>        Retries per segment after a transient failure (default: 3)
       --no-resume            Ignore an existing checkpoint and start over
-  -H, --header <LINE>        Add a request header, e.g. -H "Authorization: Bearer ..." (repeatable)
+  -H, --header <LINE>        Add a request header, e.g. -H "Authorization: Bearer ..." (repeatable).
+                             Headers are only sent to the host of the URL, not to
+                             other hosts it redirects to
+  -H @<FILE>                 Read headers from FILE, one per line ("-" for standard
+                             input); keeps secrets out of the process list
   -A, --user-agent <NAME>    Send NAME as the User-Agent
   -k, --insecure             Do not verify TLS certificates
 
@@ -174,6 +197,9 @@ Other:
   -q, --quiet                Print nothing but errors
   -V, --version              Show version information
   -h, --help                 Show this help
+
+Proxies are taken from the http_proxy, https_proxy and no_proxy environment variables.
+Redirects from an https URL to a plain http address are refused.
 ```
 
 ### CLI Examples
@@ -217,3 +243,7 @@ On Linux desktops, desktop integration files are installed to system directories
 This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
 
 Copyright (c) 2026 DancinGhost and Deox Contributors.
+
+Third-party library notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Qt is a registered trademark of The Qt Company Ltd. Linux is the registered trademark of Linus Torvalds. Windows is a trademark of the Microsoft group of companies. Rust is a trademark of the Rust Foundation. Ubuntu is a registered trademark of Canonical Ltd. Other names are trademarks of their respective owners and are used here for identification only; no endorsement is implied.

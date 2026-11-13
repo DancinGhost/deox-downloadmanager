@@ -55,3 +55,15 @@ DEOXDM_TEST(parse_byte_size_units) {
     ASSERT_FALSE(parse_byte_size("1e3").has_value());
     ASSERT_FALSE(parse_byte_size("99999999999999999999G").has_value());
 }
+
+DEOXDM_TEST(printable_text_neutralizes_terminal_controls) {
+    ASSERT_EQ(printable_text("plain https://example.com/a b"), "plain https://example.com/a b");
+    ASSERT_EQ(printable_text("\x1B]0;owned\x07title"), "?]0;owned?title");
+    ASSERT_EQ(printable_text("a\rb\nc\x7F"), "a?b?c?");
+    ASSERT_EQ(printable_text("csi\xC2\x9B" "2J"), "csi?2J");
+    ASSERT_EQ(printable_text("rlo\xE2\x80\xAE" "x"), "rlo?x");
+    ASSERT_EQ(printable_text("\xC3\xA9t\xC3\xA9"), "\xC3\xA9t\xC3\xA9");
+    // A truncated multi-byte sequence at the end is left alone, not over-read.
+    ASSERT_EQ(printable_text("end\xE2\x80"), "end\xE2\x80");
+    ASSERT_EQ(unsafe_character_length("abc", 5), 0u);
+}

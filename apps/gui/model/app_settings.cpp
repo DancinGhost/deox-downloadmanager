@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "app_settings.hpp"
+#include "model/app_settings.hpp"
 
 #include <QDir>
 #include <QSettings>

@@ -28,16 +28,24 @@ public:
     // Starts a fresh download: creates the file (and missing parent
     // directories), discards any previous content and, when the final size is
     // known, reserves the disk space up front.
+    //
+    // `server_chosen_name`: the file name came from the server, not from the
+    // user. A symbolic link under that name is then never followed, and when
+    // nothing has that name yet the file is created exclusively, so nothing
+    // can be slipped in between the caller's check and the creation.
     [[nodiscard]] static std::expected<OutputFile, core::Error> create(
         const std::filesystem::path& path,
-        std::optional<uint64_t> total_size
+        std::optional<uint64_t> total_size,
+        bool server_chosen_name = false
     );
 
     // Continues a download: the file must already exist with exactly the
-    // expected size. Its content is left untouched.
+    // expected size. Its content is left untouched. `server_chosen_name` as
+    // for create().
     [[nodiscard]] static std::expected<OutputFile, core::Error> open_existing(
         const std::filesystem::path& path,
-        uint64_t expected_size
+        uint64_t expected_size,
+        bool server_chosen_name = false
     );
 
     // Writes all of `data` at `offset`, or fails.

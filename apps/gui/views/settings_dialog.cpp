@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "settings_dialog.hpp"
+#include "views/settings_dialog.hpp"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>

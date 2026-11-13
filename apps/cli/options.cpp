@@ -28,6 +28,23 @@ std::string_view trim(std::string_view s) {
     return s.substr(first, s.find_last_not_of(spaces) - first + 1);
 }
 
+std::vector<std::string_view> split_lines(std::string_view content) {
+    std::vector<std::string_view> lines;
+    size_t pos = 0;
+    while (pos < content.size()) {
+        const size_t end = content.find('\n', pos);
+        lines.push_back(trim(content.substr(pos, end == std::string_view::npos ? end : end - pos)));
+        pos = (end == std::string_view::npos) ? content.size() : end + 1;
+    }
+    return lines;
+}
+
+// "Name: value" on a single line.
+bool is_valid_header(std::string_view header) {
+    const auto colon = header.find(':');
+    return colon != std::string_view::npos && colon > 0 && header.find_first_of("\r\n") == std::string_view::npos;
+}
+
 } // namespace
 
 std::expected<Options, std::string> parse_arguments(std::span<const std::string_view> args) {
@@ -119,10 +136,15 @@ std::expected<Options, std::string> parse_arguments(std::span<const std::string_
             options.config.expected_sha256 = std::string(digest);
         } else if (is("-H", "--header")) {
             const std::string_view header = value("a header such as 'Name: value'");
-            if (!problem && (header.find(':') == std::string_view::npos || header.find_first_of("\r\n") != std::string_view::npos)) {
+            if (!problem && header.starts_with('@')) {
+                // Read from a file later, keeping secrets out of the process list.
+                if (header.size() == 1) problem = "-H @ needs a file name";
+                else options.header_files.emplace_back(header.substr(1));
+            } else if (!problem && !is_valid_header(header)) {
                 problem = std::format("invalid header '{}': expected 'Name: value'", header);
+            } else if (!problem) {
+                options.config.headers.emplace_back(header);
             }
-            if (!problem) options.config.headers.emplace_back(header);
         } else if (is("-A", "--user-agent")) {
             options.config.user_agent = std::string(value("a user agent string"));
         } else {
@@ -165,16 +187,29 @@ std::expected<Options, std::string> parse_arguments(std::span<const std::string_
 
 std::vector<std::string> parse_url_list(std::string_view content) {
     std::vector<std::string> urls;
-    size_t pos = 0;
-    while (pos < content.size()) {
-        const size_t end = content.find('\n', pos);
-        const std::string_view line = trim(content.substr(pos, end == std::string_view::npos ? end : end - pos));
-        pos = (end == std::string_view::npos) ? content.size() : end + 1;
+    for (const std::string_view line : split_lines(content)) {
         if (!line.empty() && line.front() != '#') {
             urls.emplace_back(line);
         }
     }
     return urls;
+}
+
+std::expected<std::vector<std::string>, std::string> parse_header_list(std::string_view content) {
+    std::vector<std::string> headers;
+    size_t line_number = 0;
+    for (const std::string_view line : split_lines(content)) {
+        ++line_number;
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+        if (!is_valid_header(line)) {
+            // The line is not echoed: it may well hold a secret.
+            return std::unexpected(std::format("line {}: expected 'Name: value'", line_number));
+        }
+        headers.emplace_back(line);
+    }
+    return headers;
 }
 
 std::string help_text(std::string_view program_name) {
@@ -203,7 +238,11 @@ Transfer:
                              after SEC seconds; 0 disables the timeout (default: 30)
   -r, --retries <NUM>        Retries per segment after a transient failure (default: 3)
       --no-resume            Ignore an existing checkpoint and start over
-  -H, --header <LINE>        Add a request header, e.g. -H "Authorization: Bearer ..." (repeatable)
+  -H, --header <LINE>        Add a request header, e.g. -H "Authorization: Bearer ..." (repeatable).
+                             Headers are only sent to the host of the URL, not to
+                             other hosts it redirects to
+  -H @<FILE>                 Read headers from FILE, one per line ("-" for standard
+                             input); keeps secrets out of the process list
   -A, --user-agent <NAME>    Send NAME as the User-Agent
   -k, --insecure             Do not verify TLS certificates
 
@@ -216,6 +255,7 @@ Other:
   -h, --help                 Show this help
 
 Proxies are taken from the http_proxy, https_proxy and no_proxy environment variables.
+Redirects from an https URL to a plain http address are refused.
 
 Exit status: 0 on success, 1 if a download failed, 2 on a usage error, 130 if interrupted.
 

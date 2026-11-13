@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "add_dialog.hpp"
+#include "views/add_dialog.hpp"
 
 #include "deoxdm/core/checksum.hpp"
 #include "deoxdm/core/url.hpp"
@@ -45,6 +45,7 @@ AddDialog::AddDialog(const AppSettings& settings, QWidget* parent)
     sha256Edit_->setToolTip(tr("The finished file is checked against this checksum"));
 
     messageLabel_ = new QLabel(this);
+    messageLabel_->setTextFormat(Qt::PlainText); // messages quote the typed addresses
     messageLabel_->setWordWrap(true);
 
     buttons_ = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);

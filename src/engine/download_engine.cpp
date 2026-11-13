@@ -8,6 +8,7 @@
 #include "deoxdm/engine/output_file.hpp"
 #include "deoxdm/net/http_client.hpp"
 #include "deoxdm/engine/rate_limiter.hpp"
+#include "deoxdm/platform/path.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -82,7 +83,7 @@ struct DownloadEngine::Session {
             .total_size = plan.total_size,
             .etag = remote.etag,
             .last_modified = remote.last_modified,
-            .output_file = file.path().filename().string(),
+            .output_file = platform::path_to_utf8(file.path().filename()),
             .chunks = std::vector<ChunkState>(current.begin(), current.end())
         };
     }
@@ -131,7 +132,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run(std::stop_token s
     return result;
 }
 
-std::expected<std::filesystem::path, Error> DownloadEngine::resolve_output_path(
+std::expected<DownloadEngine::OutputTarget, Error> DownloadEngine::resolve_output_path(
     const core::RemoteFileInfo& remote,
     std::string_view url_filename,
     bool can_resume
@@ -145,10 +146,10 @@ std::expected<std::filesystem::path, Error> DownloadEngine::resolve_output_path(
     bool name_is_derived = false;
 
     if (config_.output_path.empty()) {
-        target = name;
+        target = platform::path_from_utf8(name);
         name_is_derived = true;
     } else if (std::filesystem::is_directory(config_.output_path, ec) || !config_.output_path.has_filename()) {
-        target = config_.output_path / name;
+        target = config_.output_path / platform::path_from_utf8(name);
         name_is_derived = true;
     } else {
         target = config_.output_path;
@@ -163,8 +164,11 @@ std::expected<std::filesystem::path, Error> DownloadEngine::resolve_output_path(
             const auto checkpoint = CheckpointStore::load(candidate);
             return checkpoint && checkpoint->url == config_.url;
         };
+        // A dangling symbolic link counts as taken: writing through it would
+        // create a file somewhere else.
         const auto is_free = [&](const std::filesystem::path& candidate) {
-            return !std::filesystem::exists(candidate, ec) && !CheckpointStore::exists(candidate);
+            return !std::filesystem::exists(std::filesystem::symlink_status(candidate, ec)) &&
+                   !CheckpointStore::exists(candidate);
         };
 
         const std::filesystem::path directory = target.parent_path();
@@ -172,7 +176,7 @@ std::expected<std::filesystem::path, Error> DownloadEngine::resolve_output_path(
         for (uint32_t n = 0; n < 10000 && !found; ++n) {
             const std::filesystem::path candidate = (n == 0)
                 ? target
-                : directory / core::numbered_filename(name, n);
+                : directory / platform::path_from_utf8(core::numbered_filename(name, n));
             if (is_our_unfinished_download(candidate) || is_free(candidate)) {
                 target = candidate;
                 found = true;
@@ -180,16 +184,16 @@ std::expected<std::filesystem::path, Error> DownloadEngine::resolve_output_path(
         }
         if (!found) {
             return std::unexpected(Error{ErrorCode::FileSystemError,
-                std::format("Cannot find an unused file name for '{}'", target.string())});
+                std::format("Cannot find an unused file name for '{}'", platform::path_to_utf8(target))});
         }
     }
 
     if (std::filesystem::is_directory(target, ec)) {
         return std::unexpected(Error{ErrorCode::FileSystemError,
-            std::format("'{}' is a directory", target.string())});
+            std::format("'{}' is a directory", platform::path_to_utf8(target))});
     }
 
-    return target;
+    return OutputTarget{std::move(target), name_is_derived};
 }
 
 std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std::stop_token& stop_token) {
@@ -221,15 +225,17 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
     const bool can_resume = config_.resume_enabled && remote.accepts_ranges &&
                             remote.content_length && *remote.content_length > 0;
 
-    const auto output_path = resolve_output_path(remote, url->filename, can_resume);
-    if (!output_path) {
-        return std::unexpected(output_path.error());
+    const auto output_target = resolve_output_path(remote, url->filename, can_resume);
+    if (!output_target) {
+        return std::unexpected(output_target.error());
     }
+    const std::filesystem::path& output_path = output_target->path;
+    const bool server_chosen_name = output_target->server_chosen_name;
 
-    if (can_resume && CheckpointStore::exists(*output_path)) {
-        auto checkpoint = CheckpointStore::load(*output_path);
+    if (can_resume && CheckpointStore::exists(output_path)) {
+        auto checkpoint = CheckpointStore::load(output_path);
         if (checkpoint && core::validate_resume_compatibility(*checkpoint, config_.url, remote)) {
-            if (auto file = OutputFile::open_existing(*output_path, checkpoint->total_size)) {
+            if (auto file = OutputFile::open_existing(output_path, checkpoint->total_size, server_chosen_name)) {
                 session.file = std::move(*file);
                 session.plan.total_size = checkpoint->total_size;
                 session.plan.chunks = std::move(checkpoint->chunks);
@@ -242,7 +248,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
     if (!session.resumed) {
         // Starting over: a checkpoint that may be lying around no longer
         // describes the file and must not be picked up by a later run.
-        CheckpointStore::remove(*output_path);
+        CheckpointStore::remove(output_path);
 
         if (remote.content_length) {
             auto plan = core::create_chunk_plan(
@@ -255,7 +261,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
             session.plan = core::create_unknown_size_plan();
         }
 
-        auto file = OutputFile::create(*output_path, remote.content_length);
+        auto file = OutputFile::create(output_path, remote.content_length, server_chosen_name);
         if (!file) {
             return std::unexpected(file.error());
         }
@@ -274,7 +280,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
 
     const auto save_checkpoint = [&](std::span<const ChunkState> chunks) {
         // Best effort: a checkpoint that cannot be written only costs resumability.
-        (void)CheckpointStore::save(*output_path, session.resume_data(chunks));
+        (void)CheckpointStore::save(output_path, session.resume_data(chunks));
     };
 
     if (session.checkpointing && !session.resumed) {
@@ -283,7 +289,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
 
     if (info_listener_) {
         info_listener_(DownloadInfo{
-            .output_path = *output_path,
+            .output_path = output_path,
             .total_size = session.total_size(),
             .connections = std::max<uint32_t>(workers, 1),
             .resumable = session.checkpointing,
@@ -306,7 +312,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
             // leave a truncated file behind that looks like the real thing.
             session.file.close();
             std::error_code ec;
-            std::filesystem::remove(*output_path, ec);
+            std::filesystem::remove(output_path, ec);
         }
         return std::unexpected(transferred.error());
     }
@@ -339,7 +345,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
             // The data is complete but wrong. Drop the checkpoint so that the
             // next attempt downloads everything again instead of re-verifying
             // the same bad file forever.
-            CheckpointStore::remove(*output_path);
+            CheckpointStore::remove(output_path);
             return std::unexpected(Error{ErrorCode::ChecksumMismatch,
                 std::format("SHA-256 mismatch: expected {}, got {}", config_.expected_sha256, *digest)});
         }
@@ -347,18 +353,18 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
     }
 
     session.file.close();
-    CheckpointStore::remove(*output_path);
+    CheckpointStore::remove(output_path);
 
     const auto elapsed = Clock::now() - session.started_at;
     const double seconds = std::chrono::duration<double>(elapsed).count();
-    result.output_path = *output_path;
+    result.output_path = output_path;
     result.total_bytes = final_size;
     result.bytes_transferred = final_size - session.bytes_at_start;
     result.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
     result.average_speed_bps = seconds > 0.001 ? static_cast<double>(result.bytes_transferred) / seconds : 0.0;
     result.resumed = session.resumed;
 
-    const std::string done_message = std::format("Saved {}", output_path->string());
+    const std::string done_message = std::format("Saved {}", platform::path_to_utf8(output_path));
     advance(config_.expected_sha256.empty() ? EventType::VerificationSkipped : EventType::VerificationPassed, done_message);
 
     return result;

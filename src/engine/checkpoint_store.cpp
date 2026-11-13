@@ -2,6 +2,7 @@
 #include "deoxdm/engine/checkpoint_store.hpp"
 #include "deoxdm/core/checkpoint.hpp"
 #include "deoxdm/platform/file.hpp"
+#include "deoxdm/platform/path.hpp"
 #include "deoxdm/version.hpp"
 
 #include <format>
@@ -36,7 +37,7 @@ std::expected<void, Error> CheckpointStore::save(
     if (auto res = platform::write_file_atomically(checkpoint_path, core::serialize_checkpoint(data)); !res) {
         return std::unexpected(Error{
             ErrorCode::FileSystemError,
-            std::format("Cannot write checkpoint '{}': {}", checkpoint_path.string(), res.error().message())
+            std::format("Cannot write checkpoint '{}': {}", platform::path_to_utf8(checkpoint_path), res.error().message())
         });
     }
     return {};
@@ -49,7 +50,7 @@ std::expected<core::ResumeData, Error> CheckpointStore::load(const std::filesyst
     if (!ifs.is_open()) {
         return std::unexpected(Error{
             ErrorCode::FileSystemError,
-            std::format("Cannot open checkpoint '{}'", checkpoint_path.string())
+            std::format("Cannot open checkpoint '{}'", platform::path_to_utf8(checkpoint_path))
         });
     }
 

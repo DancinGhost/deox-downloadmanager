@@ -10,6 +10,11 @@
 //
 // Option numbers follow curl/curl.h: a type base (LONG = 0, OBJECTPOINT =
 // 10000, FUNCTIONPOINT = 20000, OFF_T = 30000) plus the option's index.
+//
+// These names and values describe libcurl's public interface as defined in
+// curl/curl.h (Copyright (c) Daniel Stenberg, <daniel@haxx.se>, and many
+// contributors; curl license). No libcurl source is copied here. See
+// THIRD_PARTY_NOTICES.md for the libcurl notice.
 
 #include <cstddef>
 #include <cstdint>
@@ -51,6 +56,12 @@ inline constexpr int CURLOPT_CONNECTTIMEOUT = 78;
 inline constexpr int CURLOPT_SSL_VERIFYHOST = 81;
 inline constexpr int CURLOPT_BUFFERSIZE = 98;
 inline constexpr int CURLOPT_NOSIGNAL = 99;
+inline constexpr int CURLOPT_PROTOCOLS = 181;       // deprecated in 7.85, kept for older libcurl
+inline constexpr int CURLOPT_REDIR_PROTOCOLS = 182; // deprecated in 7.85, kept for older libcurl
+
+// Bits for CURLOPT_PROTOCOLS / CURLOPT_REDIR_PROTOCOLS
+inline constexpr long CURLPROTO_HTTP = 1L << 0;
+inline constexpr long CURLPROTO_HTTPS = 1L << 1;
 
 // Options taking a pointer
 inline constexpr int CURLOPT_WRITEDATA = 10001;
@@ -71,6 +82,7 @@ inline constexpr int CURLOPT_XFERINFOFUNCTION = 20219;
 
 // curl_easy_getinfo selectors
 inline constexpr int CURLINFO_EFFECTIVE_URL = 0x100000 + 1;
+inline constexpr int CURLINFO_REDIRECT_URL = 0x100000 + 31;
 inline constexpr int CURLINFO_RESPONSE_CODE = 0x200000 + 2;
 inline constexpr int CURLINFO_CONTENT_LENGTH_DOWNLOAD_T = 0x600000 + 15;
 

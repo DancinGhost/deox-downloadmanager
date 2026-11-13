@@ -10,11 +10,11 @@
 #include "mock_http_server.hpp"
 #include "test_framework.hpp"
 
-#include "add_dialog.hpp"
-#include "download_model.hpp"
-#include "download_queue.hpp"
-#include "icons.hpp"
-#include "main_window.hpp"
+#include "views/add_dialog.hpp"
+#include "model/download_model.hpp"
+#include "model/download_queue.hpp"
+#include "views/icons.hpp"
+#include "views/main_window.hpp"
 
 #include "deoxdm/engine/checkpoint_store.hpp"
 

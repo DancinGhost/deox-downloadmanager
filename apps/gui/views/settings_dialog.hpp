@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "app_settings.hpp"
+#include "model/app_settings.hpp"
 
 #include <QDialog>
 

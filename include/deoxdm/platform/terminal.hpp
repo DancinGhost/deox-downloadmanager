@@ -22,4 +22,9 @@ enum class StandardStream {
 // console into virtual-terminal mode. Returns false if that is impossible.
 [[nodiscard]] bool enable_ansi_escapes(StandardStream stream) noexcept;
 
+// Whether colored output should be written to the stream: it is a terminal,
+// escape sequences work (enable_ansi_escapes()) and the user has not opted
+// out with NO_COLOR (https://no-color.org) or TERM=dumb.
+[[nodiscard]] bool supports_color(StandardStream stream) noexcept;
+
 } // namespace deoxdm::platform

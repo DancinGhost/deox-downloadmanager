@@ -124,3 +124,41 @@ DEOXDM_TEST(url_numbered_filename) {
     ASSERT_EQ(numbered_filename("README", 1), "README.1");
     ASSERT_EQ(numbered_filename(".bashrc", 1), ".bashrc.1");
 }
+
+DEOXDM_TEST(url_filename_cannot_be_hidden_or_a_device) {
+    // A server must not be able to create dot files such as shell start-up scripts.
+    ASSERT_EQ(sanitize_filename(".bashrc"), "bashrc");
+    ASSERT_EQ(sanitize_filename("..htaccess"), "htaccess");
+    ASSERT_EQ(sanitize_filename(". .profile"), "profile");
+    ASSERT_EQ(sanitize_filename("..."), "download.bin");
+    ASSERT_EQ(filename_from_content_disposition("attachment; filename=\".bashrc\""), "bashrc");
+    ASSERT_EQ(parse_url("http://example.com/%2Ebashrc")->filename, "bashrc");
+
+    // Windows device names.
+    ASSERT_EQ(sanitize_filename("CON"), "_CON");
+    ASSERT_EQ(sanitize_filename("nul.txt"), "_nul.txt");
+    ASSERT_EQ(sanitize_filename("Com1.tar.gz"), "_Com1.tar.gz");
+    ASSERT_EQ(sanitize_filename("lpt9"), "_lpt9");
+    ASSERT_EQ(sanitize_filename("console.log"), "console.log");
+    ASSERT_EQ(sanitize_filename("com10"), "com10");
+    ASSERT_EQ(sanitize_filename("auxiliary.bin"), "auxiliary.bin");
+}
+
+DEOXDM_TEST(url_filename_replaces_invisible_controls) {
+    // U+202E RIGHT-TO-LEFT OVERRIDE would show "invoice<U+202E>fdp.exe" as "invoiceexe.pdf".
+    ASSERT_EQ(sanitize_filename("invoice\xE2\x80\xAE" "fdp.exe"), "invoice_fdp.exe");
+    ASSERT_EQ(sanitize_filename("a\xE2\x81\xA6" "b\xE2\x80\x8F" "c"), "a_b_c");
+    // C1 control U+009B (a one-character CSI in some terminals).
+    ASSERT_EQ(sanitize_filename("x\xC2\x9B" "1m.txt"), "x_1m.txt");
+    // Ordinary non-ASCII text is kept.
+    ASSERT_EQ(sanitize_filename("caf\xC3\xA9 \xE2\x80\x94 \xE6\x97\xA5\xE6\x9C\xAC.txt"),
+              "caf\xC3\xA9 \xE2\x80\x94 \xE6\x97\xA5\xE6\x9C\xAC.txt");
+}
+
+DEOXDM_TEST(url_redact_credentials) {
+    ASSERT_EQ(redact_credentials("https://user:secret@example.com/a?b=c"), "https://***@example.com/a?b=c");
+    ASSERT_EQ(redact_credentials("http://token@example.com"), "http://***@example.com");
+    ASSERT_EQ(redact_credentials("https://example.com/path@v2/file"), "https://example.com/path@v2/file");
+    ASSERT_EQ(redact_credentials("https://example.com/a?mail=x@y.z"), "https://example.com/a?mail=x@y.z");
+    ASSERT_EQ(redact_credentials("not a url"), "not a url");
+}

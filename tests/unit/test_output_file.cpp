@@ -179,3 +179,53 @@ DEOXDM_TEST(checkpoint_io_round_trip) {
     ASSERT_FALSE(CheckpointStore::exists(target));
     CheckpointStore::remove(target); // removing a missing checkpoint is fine
 }
+
+#ifndef _WIN32
+DEOXDM_TEST(file_writer_server_chosen_name_never_follows_links) {
+    const TempDir dir;
+    const auto victim = dir / "victim.txt";
+    write_file(victim, "precious");
+
+    // A link planted under the name the server chose.
+    const auto planted = dir / "download.bin";
+    std::filesystem::create_symlink(victim, planted);
+    ASSERT_FALSE(OutputFile::create(planted, 4, true).has_value());
+    ASSERT_FALSE(OutputFile::open_existing(planted, 8, true).has_value());
+    ASSERT_EQ(read_file(victim), "precious");
+
+    // A dangling link would otherwise create a file elsewhere.
+    const auto dangling = dir / "other.bin";
+    std::filesystem::create_symlink(dir / "elsewhere.txt", dangling);
+    ASSERT_FALSE(OutputFile::create(dangling, 4, true).has_value());
+    ASSERT_FALSE(std::filesystem::exists(dir / "elsewhere.txt"));
+
+    // A name the user chose still follows links, as the user asked for.
+    ASSERT_TRUE(OutputFile::create(planted, 4, false).has_value());
+    ASSERT_EQ(std::filesystem::file_size(victim), 4u);
+}
+
+DEOXDM_TEST(checkpoint_is_private_and_ignores_planted_links) {
+    const TempDir dir;
+    const auto target = dir / "file.bin";
+    const auto victim = dir / "victim.txt";
+    write_file(victim, "precious");
+
+    // Another user could plant the temporary file name as a link.
+    const auto checkpoint_path = CheckpointStore::checkpoint_path_for(target);
+    std::filesystem::create_symlink(victim, deoxdm::platform::atomic_temp_path(checkpoint_path));
+
+    deoxdm::core::ResumeData data;
+    data.url = "https://user:pass@example.com/file.bin";
+    data.total_size = 10;
+    data.output_file = "file.bin";
+    data.chunks.push_back({.index = 0, .range = {0, 9}, .bytes_downloaded = 0, .status = deoxdm::core::ChunkStatus::Pending});
+    ASSERT_TRUE(CheckpointStore::save(target, data).has_value());
+
+    ASSERT_EQ(read_file(victim), "precious");
+    ASSERT_FALSE(std::filesystem::is_symlink(checkpoint_path));
+    // The checkpoint holds the URL, which may carry credentials or tokens.
+    const auto perms = std::filesystem::status(checkpoint_path).permissions();
+    ASSERT_EQ(perms & (std::filesystem::perms::group_all | std::filesystem::perms::others_all), std::filesystem::perms::none);
+    ASSERT_TRUE(CheckpointStore::load(target).has_value());
+}
+#endif

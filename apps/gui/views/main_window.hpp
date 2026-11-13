@@ -49,6 +49,7 @@ private:
     void openSelectedFolder();
     void copySelectedUrls();
     void showSettings();
+    void showAbout();
 
     DownloadQueue* queue_;
     DownloadModel* model_;
@@ -64,6 +65,7 @@ private:
     QAction* openFolderAction_{nullptr};
     QAction* copyUrlAction_{nullptr};
     QAction* settingsAction_{nullptr};
+    QAction* aboutAction_{nullptr};
 };
 
 } // namespace deoxdm::gui

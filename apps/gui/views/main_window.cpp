@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-#include "main_window.hpp"
+#include "views/main_window.hpp"
 
-#include "add_dialog.hpp"
-#include "download_model.hpp"
-#include "download_queue.hpp"
-#include "icons.hpp"
-#include "progress_delegate.hpp"
-#include "settings_dialog.hpp"
+#include "views/add_dialog.hpp"
+#include "model/download_model.hpp"
+#include "model/download_queue.hpp"
+#include "views/icons.hpp"
+#include "views/progress_delegate.hpp"
+#include "views/settings_dialog.hpp"
 
 #include "deoxdm/core/formatting.hpp"
 #include "deoxdm/version.hpp"
@@ -167,6 +167,10 @@ void MainWindow::createActions() {
     settingsAction_->setToolTip(tr("Download folder, connections and limits"));
     connect(settingsAction_, &QAction::triggered, this, &MainWindow::showSettings);
 
+    aboutAction_ = new QAction(tr("&About"), this);
+    aboutAction_->setToolTip(tr("Version, license and third-party notices"));
+    connect(aboutAction_, &QAction::triggered, this, &MainWindow::showAbout);
+
     auto* pasteAction = new QAction(tr("Paste Address"), this);
     pasteAction->setShortcut(QKeySequence::Paste);
     connect(pasteAction, &QAction::triggered, this, &MainWindow::pasteUrls);
@@ -191,6 +195,7 @@ void MainWindow::createActions() {
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     toolbar->addWidget(spacer);
     toolbar->addAction(settingsAction_);
+    toolbar->addAction(aboutAction_);
 }
 
 std::vector<DownloadTask*> MainWindow::selectedTasks() const {
@@ -245,6 +250,32 @@ void MainWindow::updateEmptyState() {
     stack_->setCurrentIndex(queue_->count() == 0 ? 0 : 1);
 }
 
+void MainWindow::showAbout() {
+    const QString name = QString::fromUtf8(PROJECT_NAME);
+    const QString version = QString::fromUtf8(VERSION_STRING);
+    const QString url = QString::fromUtf8(PROJECT_URL);
+
+    QMessageBox box(this);
+    box.setWindowTitle(tr("About %1").arg(name));
+    box.setIconPixmap(applicationIcon().pixmap(64, 64));
+    box.setTextFormat(Qt::RichText);
+    box.setText(tr("<h3>%1 %2</h3>"
+                   "<p>Copyright &copy; 2026 DancinGhost and Deox Contributors.<br>"
+                   "Licensed under the MIT License.</p>"
+                   "<p><a href=\"%3\">%3</a></p>")
+                    .arg(name.toHtmlEscaped(), version.toHtmlEscaped(), url.toHtmlEscaped()));
+    box.setInformativeText(
+        tr("<p>This program uses Qt %1 under the GNU Lesser General Public License v3 (LGPL-3.0), "
+           "linked dynamically, and libcurl under the curl license. See THIRD_PARTY_NOTICES.md "
+           "for the full notices.</p>"
+           "<p>Qt is a registered trademark of The Qt Company Ltd.</p>")
+            .arg(QString::fromLatin1(qVersion())));
+    box.setStandardButtons(QMessageBox::Close);
+    QPushButton* aboutQt = box.addButton(tr("About &Qt"), QMessageBox::HelpRole);
+    connect(aboutQt, &QPushButton::clicked, this, [this] { QMessageBox::aboutQt(this); });
+    box.exec();
+}
+
 void MainWindow::promptForDownloads(const QStringList& urls) {
     AddDialog dialog(queue_->settings(), this);
     if (!urls.isEmpty()) {
@@ -297,6 +328,7 @@ void MainWindow::removeSelected() {
     QMessageBox box(this);
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(tr("Remove Downloads"));
+    box.setTextFormat(Qt::PlainText); // the text contains a file name
     box.setText(tasks.size() == 1
         ? tr("Remove “%1” from the list?").arg(tasks.front()->displayName())
         : tr("Remove %n downloads from the list?", nullptr, static_cast<int>(tasks.size())));

@@ -66,7 +66,12 @@ private:
     struct Session;
 
     [[nodiscard]] std::expected<core::DownloadResult, core::Error> run_session(const std::stop_token& stop_token);
-    [[nodiscard]] std::expected<std::filesystem::path, core::Error> resolve_output_path(
+    struct OutputTarget {
+        std::filesystem::path path;
+        bool server_chosen_name{false}; // the name came from the server, not from config.output_path
+    };
+
+    [[nodiscard]] std::expected<OutputTarget, core::Error> resolve_output_path(
         const core::RemoteFileInfo& remote, std::string_view url_filename, bool can_resume) const;
     [[nodiscard]] std::expected<void, core::Error> transfer(Session& session, const std::stop_token& stop_token);
     [[nodiscard]] std::expected<void, core::Error> download_chunk_with_retries(

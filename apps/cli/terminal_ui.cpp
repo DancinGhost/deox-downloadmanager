@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include "terminal_ui.hpp"
 #include "deoxdm/core/formatting.hpp"
+#include "deoxdm/core/url.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <format>
 #include <iostream>
 
@@ -27,14 +27,6 @@ int terminal_width() {
     return platform::terminal_columns(StandardStream::Output);
 }
 
-bool color_allowed(StandardStream stream) {
-    // https://no-color.org
-    const char* no_color = std::getenv("NO_COLOR");
-    const char* term = std::getenv("TERM");
-    return platform::is_terminal(stream) && (no_color == nullptr || *no_color == '\0') &&
-           (term == nullptr || std::string_view(term) != "dumb") && platform::enable_ansi_escapes(stream);
-}
-
 } // namespace
 
 TerminalUI::TerminalUI(bool quiet)
@@ -42,8 +34,8 @@ TerminalUI::TerminalUI(bool quiet)
       // The live display redraws itself with cursor movement sequences, so it
       // needs a terminal that understands them.
       is_tty_(platform::is_terminal(StandardStream::Output) && platform::enable_ansi_escapes(StandardStream::Output)),
-      use_color_(color_allowed(StandardStream::Output)),
-      error_color_(color_allowed(StandardStream::Error)) {}
+      use_color_(platform::supports_color(StandardStream::Output)),
+      error_color_(platform::supports_color(StandardStream::Error)) {}
 
 std::string TerminalUI::paint(std::string_view color, std::string_view text) const {
     if (!use_color_) {
@@ -58,13 +50,17 @@ void TerminalUI::erase_progress() {
     }
 }
 
-void TerminalUI::begin(std::string_view url, size_t position, size_t count) {
+// URLs, file names and error messages can come from a server or an input file.
+// Control characters in them could drive the terminal (escape sequences), so
+// everything of that kind goes through printable_text() before it is shown.
+void TerminalUI::begin(std::string_view raw_url, size_t position, size_t count) {
     resumable_ = false;
     rendered_lines_ = 0;
     next_logged_percentage_ = 0.0;
     last_plain_log_ = {};
 
     if (quiet_) return;
+    const std::string url = core::printable_text(core::redact_credentials(raw_url));
     if (count > 1) {
         std::cout << std::format("{} ({}/{}) {}\n", paint(kCyan, "[deox-dm]"), position, count, url);
     } else {
@@ -84,7 +80,7 @@ void TerminalUI::on_state_change(core::DownloadPhase phase, std::string_view mes
     }
 
     erase_progress();
-    std::cout << std::format("{} {}\n", paint(kCyan, "[deox-dm]"), message);
+    std::cout << std::format("{} {}\n", paint(kCyan, "[deox-dm]"), core::printable_text(message));
     std::cout.flush();
 }
 
@@ -95,7 +91,7 @@ void TerminalUI::on_info(const engine::DownloadInfo& info) {
     erase_progress();
     const std::string size = info.total_size ? core::format_bytes(*info.total_size) : std::string("unknown size");
     std::cout << std::format("{} Saving to {} ({})\n",
-        paint(kCyan, "[deox-dm]"), paint(kBold, info.output_path.string()), size);
+        paint(kCyan, "[deox-dm]"), paint(kBold, core::printable_text(info.output_path.string())), size);
     if (info.resumed) {
         std::cout << std::format("{} Continuing an earlier download, {} already on disk\n",
             paint(kCyan, "[deox-dm]"), core::format_bytes(info.bytes_already_present));
@@ -212,7 +208,7 @@ void TerminalUI::finish_success(const core::DownloadResult& result) {
     const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(result.elapsed);
     std::cout << std::format("{} {} ({}) in {} at {}\n",
         paint(kGreen, "[deox-dm] Done:"),
-        result.output_path.string(),
+        core::printable_text(result.output_path.string()),
         core::format_bytes(result.total_bytes),
         seconds.count() > 0 ? core::format_duration(seconds) : std::string("under a second"),
         core::format_speed(result.average_speed_bps));
@@ -229,7 +225,7 @@ void TerminalUI::finish_failure(const core::Error& error) {
     }
 
     const bool was_cancelled = error.code == core::ErrorCode::Cancelled;
-    const std::string text = was_cancelled ? std::string("[deox-dm] Cancelled") : std::format("[deox-dm] Failed: {}", error.message);
+    const std::string text = was_cancelled ? std::string("[deox-dm] Cancelled") : std::format("[deox-dm] Failed: {}", core::printable_text(error.message));
 
     std::cerr << (error_color_ ? std::format("\033[{}m{}\033[0m", was_cancelled ? kYellow : kRed, text) : text) << "\n";
     // A checksum mismatch discards the checkpoint: the data is complete but wrong.

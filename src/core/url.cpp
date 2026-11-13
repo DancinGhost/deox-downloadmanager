@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "deoxdm/core/url.hpp"
+#include "deoxdm/core/formatting.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -55,6 +56,20 @@ size_t extension_start(std::string_view name) noexcept {
     return last_dot;
 }
 
+// CON, PRN, AUX, NUL, COM1-COM9 and LPT1-LPT9, with or without an extension.
+bool is_windows_device_name(std::string_view name) noexcept {
+    std::string_view stem = name.substr(0, name.find('.'));
+    while (!stem.empty() && stem.back() == ' ') stem.remove_suffix(1);
+    const auto is = [&](std::string_view device) {
+        return stem.size() == device.size() && starts_with_icase(stem, device);
+    };
+    if (is("con") || is("prn") || is("aux") || is("nul")) {
+        return true;
+    }
+    return stem.size() == 4 && (starts_with_icase(stem, "com") || starts_with_icase(stem, "lpt")) &&
+           stem[3] >= '1' && stem[3] <= '9';
+}
+
 } // namespace
 
 std::string Url::full_url() const {
@@ -105,17 +120,25 @@ std::string sanitize_filename(std::string_view filename) noexcept {
     std::string sanitized;
     sanitized.reserve(filename.size());
 
-    for (const char ch : filename) {
-        const auto byte = static_cast<unsigned char>(ch);
-        const bool control = byte < 32 || byte == 127;
+    for (size_t pos = 0; pos < filename.size();) {
+        // Control characters, and bidirectional controls that would make the
+        // name display differently from what it is.
+        if (const size_t unsafe = unsafe_character_length(filename, pos); unsafe > 0) {
+            sanitized.push_back('_');
+            pos += unsafe;
+            continue;
+        }
+        const char ch = filename[pos++];
         const bool reserved = ch == ':' || ch == '*' || ch == '?' || ch == '"' ||
                               ch == '<' || ch == '>' || ch == '|';
-        // Bytes >= 0x80 are parts of UTF-8 sequences and are kept as they are.
-        sanitized.push_back((control || reserved) ? '_' : ch);
+        // Other bytes >= 0x80 are parts of UTF-8 sequences and are kept as they are.
+        sanitized.push_back(reserved ? '_' : ch);
     }
 
-    // Leading/trailing spaces and trailing dots are trouble on several file systems.
-    while (!sanitized.empty() && sanitized.front() == ' ') sanitized.erase(sanitized.begin());
+    // Leading/trailing spaces and trailing dots are trouble on several file
+    // systems. Leading dots would let a server create hidden files such as
+    // ".bashrc" or ".htaccess".
+    while (!sanitized.empty() && (sanitized.front() == ' ' || sanitized.front() == '.')) sanitized.erase(sanitized.begin());
     while (!sanitized.empty() && (sanitized.back() == ' ' || sanitized.back() == '.')) sanitized.pop_back();
 
     if (sanitized.size() > kMaxFilenameBytes) {
@@ -128,11 +151,33 @@ std::string sanitize_filename(std::string_view filename) noexcept {
         sanitized = sanitized.substr(0, keep) + ext;
     }
 
-    if (sanitized.empty() || sanitized == "." || sanitized == "..") {
+    if (sanitized.empty()) {
         return std::string(kFallbackName);
     }
 
+    // On Windows "CON", "nul.txt" and the like name devices, not files.
+    if (is_windows_device_name(sanitized)) {
+        sanitized.insert(sanitized.begin(), '_');
+    }
+
     return sanitized;
+}
+
+std::string redact_credentials(std::string_view url) {
+    const auto scheme_end = url.find("://");
+    if (scheme_end == std::string_view::npos) {
+        return std::string(url);
+    }
+    const size_t authority_start = scheme_end + 3;
+    const size_t authority_end = std::min(url.find_first_of("/?#", authority_start), url.size());
+    const auto at = url.substr(authority_start, authority_end - authority_start).rfind('@');
+    if (at == std::string_view::npos) {
+        return std::string(url);
+    }
+    std::string out(url.substr(0, authority_start));
+    out += "***@";
+    out += url.substr(authority_start + at + 1);
+    return out;
 }
 
 std::string extract_filename_from_url(std::string_view path, std::string_view fallback) noexcept {

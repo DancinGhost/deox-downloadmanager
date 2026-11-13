@@ -7,6 +7,7 @@
 // POSIX assumptions. See docs/PLATFORMS.md.
 
 #include "deoxdm/platform/file.hpp"
+#include "backend.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -69,24 +70,38 @@ void File::close() noexcept {
     }
 }
 
-Result<File> File::open(const std::filesystem::path& path, OpenMode mode) noexcept {
+Result<File> File::open(const std::filesystem::path& path, OpenMode mode, OpenOptions options) noexcept {
     DWORD access = GENERIC_READ;
     DWORD disposition = OPEN_EXISTING;
     switch (mode) {
         case OpenMode::CreateTruncate: access |= GENERIC_WRITE; disposition = CREATE_ALWAYS; break;
+        case OpenMode::CreateNew:      access |= GENERIC_WRITE; disposition = CREATE_NEW; break;
         case OpenMode::OpenExisting:   access |= GENERIC_WRITE; disposition = OPEN_EXISTING; break;
         case OpenMode::ReadOnly:       break;
     }
+    // Without following links, a reparse point is opened itself; it is
+    // rejected below once the handle shows what it is.
+    const DWORD flags = FILE_ATTRIBUTE_NORMAL | (options.follow_symlinks ? 0 : FILE_FLAG_OPEN_REPARSE_POINT);
 
     // FILE_SHARE_DELETE lets the file be renamed or removed while open, which
     // matches POSIX semantics closely enough for our use.
     const HANDLE handle = ::CreateFileW(path.c_str(), access,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        disposition, FILE_ATTRIBUTE_NORMAL, nullptr);
+        disposition, flags, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         return last_error();
     }
-    return File(static_cast<NativeHandle>(handle));
+    File file(static_cast<NativeHandle>(handle));
+    if (!options.follow_symlinks) {
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!::GetFileInformationByHandle(handle, &info)) {
+            return last_error();
+        }
+        if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+            return error_from(ERROR_CANT_ACCESS_FILE);
+        }
+    }
+    return file;
 }
 
 Result<void> File::write_at(uint64_t offset, std::span<const uint8_t> data) noexcept {
@@ -188,40 +203,20 @@ Result<void> File::sync() noexcept {
     return {};
 }
 
-std::filesystem::path atomic_temp_path(const std::filesystem::path& path) {
-    return std::filesystem::path(path.native() + L".tmp");
+namespace detail {
+
+void remove_file_quietly(const std::filesystem::path& path) noexcept {
+    ::DeleteFileW(path.c_str());
 }
 
-Result<void> write_file_atomically(const std::filesystem::path& path, std::string_view content) noexcept {
-    std::filesystem::path tmp_path;
-    try {
-        tmp_path = atomic_temp_path(path);
-    } catch (...) {
-        return error_from(ERROR_NOT_ENOUGH_MEMORY);
-    }
-
-    auto file = File::open(tmp_path, OpenMode::CreateTruncate);
-    if (!file) {
-        return std::unexpected(file.error());
-    }
-    const auto bytes = std::span(reinterpret_cast<const uint8_t*>(content.data()), content.size());
-    auto written = file->write_at(0, bytes);
-    if (written) {
-        written = file->sync();
-    }
-    file->close();
-
-    if (!written) {
-        ::DeleteFileW(tmp_path.c_str());
-        return written;
-    }
-    if (!::MoveFileExW(tmp_path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        const DWORD err = ::GetLastError();
-        ::DeleteFileW(tmp_path.c_str());
-        return error_from(err);
+Result<void> replace_file(const std::filesystem::path& from, const std::filesystem::path& to) noexcept {
+    if (!::MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return last_error();
     }
     return {};
 }
+
+} // namespace detail
 
 bool is_out_of_space(const std::error_code& error) noexcept {
     if (error.category() != std::system_category()) {

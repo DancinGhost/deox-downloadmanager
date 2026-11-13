@@ -29,10 +29,16 @@ struct Url {
 // Derives a safe local file name from a URL path.
 [[nodiscard]] std::string extract_filename_from_url(std::string_view path, std::string_view fallback = "download.bin") noexcept;
 
-// Reduces an untrusted name to a single safe path component: directory parts,
-// control characters and characters that are illegal on common file systems
-// are removed. Never returns an empty string, "." or "..".
+// Reduces an untrusted name to a single safe path component: directory parts
+// and leading dots are removed; control characters, bidirectional controls and
+// characters that are illegal on common file systems are replaced; Windows
+// device names ("CON", "nul.txt") get a '_' prefix. Never returns an empty
+// string, a hidden (dot) file name, "." or "..".
 [[nodiscard]] std::string sanitize_filename(std::string_view filename) noexcept;
+
+// `url` with the user name and password, if any, replaced by "***", for
+// showing it to a user or writing it to a log.
+[[nodiscard]] std::string redact_credentials(std::string_view url);
 
 // Extracts the file name from a Content-Disposition header value, preferring
 // the RFC 5987 `filename*=` form. Returns an empty string when there is none.

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "app_settings.hpp"
-#include "download_task.hpp"
+#include "model/app_settings.hpp"
+#include "model/download_task.hpp"
 
 #include <QObject>
 #include <QString>

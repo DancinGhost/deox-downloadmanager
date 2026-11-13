@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "progress_delegate.hpp"
+#include "views/progress_delegate.hpp"
 
-#include "download_model.hpp"
-#include "download_task.hpp"
+#include "model/download_model.hpp"
+#include "model/download_task.hpp"
 
 #include <QApplication>
 #include <QPainter>

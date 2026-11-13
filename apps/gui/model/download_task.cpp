@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-#include "download_task.hpp"
+#include "model/download_task.hpp"
 
 #include "deoxdm/core/formatting.hpp"
 #include "deoxdm/core/url.hpp"
 #include "deoxdm/engine/checkpoint_store.hpp"
 #include "deoxdm/engine/download_engine.hpp"
+#include "deoxdm/platform/path.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -56,10 +57,10 @@ void DownloadTask::start(const core::DownloadConfig& base) {
     if (outputPath_.isEmpty()) {
         // A trailing separator tells the engine to pick the file name itself,
         // without ever replacing an existing file.
-        config.output_path = std::filesystem::path(spec_.directory.toStdString()) / "";
+        config.output_path = platform::path_from_utf8(spec_.directory.toStdString()) / "";
     } else {
         // Continue with the file this task already owns.
-        config.output_path = outputPath_.toStdString();
+        config.output_path = platform::path_from_utf8(outputPath_.toStdString());
     }
 
     active_ = true;
@@ -87,7 +88,7 @@ void DownloadTask::start(const core::DownloadConfig& base) {
 
         engine.set_info_listener([this](const engine::DownloadInfo& info) {
             QMetaObject::invokeMethod(this, [this, info] {
-                outputPath_ = QString::fromStdString(info.output_path.string());
+                outputPath_ = QString::fromStdString(platform::path_to_utf8(info.output_path));
                 totalBytes_ = info.total_size ? std::optional<quint64>(*info.total_size) : std::nullopt;
                 downloadedBytes_ = info.bytes_already_present;
                 resumable_ = info.resumable;
@@ -220,7 +221,7 @@ void DownloadTask::deleteFiles() const {
         return;
     }
     QFile::remove(outputPath_);
-    engine::CheckpointStore::remove(outputPath_.toStdString());
+    engine::CheckpointStore::remove(platform::path_from_utf8(outputPath_.toStdString()));
 }
 
 } // namespace deoxdm::gui

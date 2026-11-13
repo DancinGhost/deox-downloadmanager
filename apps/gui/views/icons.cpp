@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "icons.hpp"
+#include "views/icons.hpp"
 
 #include <QPainter>
 #include <QPainterPath>

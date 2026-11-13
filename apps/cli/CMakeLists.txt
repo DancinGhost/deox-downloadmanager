@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # deox-dm: command line front end
 
 # Argument parsing and console output, kept in a library so the tests can use them.

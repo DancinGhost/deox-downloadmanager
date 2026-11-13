@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Test suites
 #
 #   deoxdm_tests      unit tests (tests/unit) and end-to-end engine tests
@@ -23,6 +24,7 @@ set(DEOXDM_UNIT_TESTS
     unit/test_formatting.cpp
     unit/test_http_headers.cpp
     unit/test_output_file.cpp
+    unit/test_platform.cpp
     unit/test_progress.cpp
     unit/test_rate_limiter.cpp
     unit/test_state_machine.cpp

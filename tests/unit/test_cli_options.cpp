@@ -120,3 +120,24 @@ DEOXDM_TEST(cli_url_list_parsing) {
     ASSERT_EQ(urls[2], "https://example.com/d");
     ASSERT_TRUE(parse_url_list("").empty());
 }
+
+DEOXDM_TEST(cli_headers_from_file) {
+    const auto options = parse({"-H", "@secret-headers.txt", "-H", "X-Inline: 1", "https://example.com/a"});
+    ASSERT_TRUE(options.has_value());
+    ASSERT_EQ(options->header_files.size(), 1u);
+    ASSERT_EQ(options->header_files[0], "secret-headers.txt");
+    ASSERT_EQ(options->config.headers.size(), 1u);
+    ASSERT_FALSE(parse({"-H", "@", "https://example.com/a"}).has_value());
+    ASSERT_FALSE(parse({"-H", ": no name", "https://example.com/a"}).has_value());
+
+    const auto headers = parse_header_list("# API access\r\nAuthorization: Bearer abc\r\n\r\n  X-Api-Key: k  \n");
+    ASSERT_TRUE(headers.has_value());
+    ASSERT_EQ(headers->size(), 2u);
+    ASSERT_EQ((*headers)[0], "Authorization: Bearer abc");
+    ASSERT_EQ((*headers)[1], "X-Api-Key: k");
+
+    const auto bad = parse_header_list("Good: 1\nsecret-without-colon\n");
+    ASSERT_FALSE(bad.has_value());
+    ASSERT_TRUE(bad.error().find("line 2") != std::string::npos);
+    ASSERT_TRUE(bad.error().find("secret") == std::string::npos); // never echoed
+}

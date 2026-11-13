@@ -14,6 +14,7 @@ namespace deoxdm::cli {
 struct Options {
     std::vector<std::string> urls;
     std::vector<std::string> input_files; // files listing URLs, "-" for standard input
+    std::vector<std::string> header_files; // files listing request headers ("-H @FILE"), "-" for standard input
     core::DownloadConfig config;          // applies to every URL; config.url is left empty
     bool quiet{false};
     bool show_help{false};
@@ -27,6 +28,11 @@ struct Options {
 // Extracts URLs from the content of an input file: one per line, blank lines
 // and lines starting with '#' are ignored.
 [[nodiscard]] std::vector<std::string> parse_url_list(std::string_view content);
+
+// Extracts request headers from the content of a header file: one "Name: value"
+// per line, blank lines and lines starting with '#' are ignored. On failure
+// the error is a message suitable for showing to the user.
+[[nodiscard]] std::expected<std::vector<std::string>, std::string> parse_header_list(std::string_view content);
 
 [[nodiscard]] std::string help_text(std::string_view program_name);
 [[nodiscard]] std::string version_text();

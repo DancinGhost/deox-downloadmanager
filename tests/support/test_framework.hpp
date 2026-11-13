@@ -8,10 +8,10 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unistd.h>
 #include <vector>
 
 namespace deoxdm::test {
@@ -44,12 +44,22 @@ struct AssertionFailure : std::runtime_error {
 // A scratch directory that is removed again when the test ends.
 class TempDir {
 public:
+    // Portable stand-in for mkdtemp(): create_directory() fails when the
+    // name exists, so a random name is retried until one is new.
     TempDir() {
-        std::string pattern = (std::filesystem::temp_directory_path() / "deoxdm-test-XXXXXX").string();
-        if (::mkdtemp(pattern.data()) == nullptr) {
-            throw std::runtime_error("cannot create a temporary directory");
+        std::random_device random;
+        const auto base = std::filesystem::temp_directory_path();
+        for (int attempt = 0; attempt < 100; ++attempt) {
+            auto candidate = base / std::format("deoxdm-test-{:08x}{:08x}", random(), random());
+            std::error_code ec;
+            if (std::filesystem::create_directory(candidate, ec)) {
+                std::filesystem::permissions(candidate, std::filesystem::perms::owner_all,
+                                             std::filesystem::perm_options::replace, ec);
+                path_ = std::move(candidate);
+                return;
+            }
         }
-        path_ = pattern;
+        throw std::runtime_error("cannot create a temporary directory");
     }
 
     ~TempDir() {

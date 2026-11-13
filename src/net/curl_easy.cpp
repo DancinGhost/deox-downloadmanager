@@ -54,10 +54,16 @@ CurlEasy::CurlEasy() {
     setopt(abi::CURLOPT_NOSIGNAL, 1L); // required for multi-threaded use
     setopt(abi::CURLOPT_ERRORBUFFER, error_buffer_.data());
     setopt(abi::CURLOPT_BUFFERSIZE, 128L * 1024L);
-    // Never let a redirect leave HTTP(S). Older libcurl versions lack these
-    // options; their defaults are acceptable.
-    setopt(abi::CURLOPT_PROTOCOLS_STR, "http,https", true);
-    setopt(abi::CURLOPT_REDIR_PROTOCOLS_STR, "http,https", true);
+    // Never let a request or a redirect leave HTTP(S). The string options
+    // exist since libcurl 7.85; older versions only know the bitmask form,
+    // and their defaults would allow redirects to FTP.
+    constexpr long http_only = abi::CURLPROTO_HTTP | abi::CURLPROTO_HTTPS;
+    if (!setopt(abi::CURLOPT_PROTOCOLS_STR, "http,https", true)) {
+        setopt(abi::CURLOPT_PROTOCOLS, http_only);
+    }
+    if (!setopt(abi::CURLOPT_REDIR_PROTOCOLS_STR, "http,https", true)) {
+        setopt(abi::CURLOPT_REDIR_PROTOCOLS, http_only);
+    }
     set_user_agent(std::format("{}/{}", USER_AGENT_PRODUCT, VERSION_STRING));
 }
 
@@ -71,12 +77,13 @@ CurlEasy::~CurlEasy() {
 }
 
 template <typename T>
-void CurlEasy::setopt(int option, T value, bool optional) noexcept {
-    if (!handle_) return;
+bool CurlEasy::setopt(int option, T value, bool optional) noexcept {
+    if (!handle_) return false;
     const abi::CURLcode rc = abi::curl_easy_setopt(handle_, option, value);
     if (rc != abi::CURLE_OK && !optional && setopt_error_ == 0) {
         setopt_error_ = rc;
     }
+    return rc == abi::CURLE_OK;
 }
 
 void CurlEasy::set_url(const std::string& url) {
@@ -89,11 +96,6 @@ void CurlEasy::set_range(const std::string& range_spec) {
 
 void CurlEasy::set_nobody(bool nobody) {
     setopt(abi::CURLOPT_NOBODY, nobody ? 1L : 0L);
-}
-
-void CurlEasy::set_follow_redirects(uint32_t max_redirects) {
-    setopt(abi::CURLOPT_FOLLOWLOCATION, max_redirects > 0 ? 1L : 0L);
-    setopt(abi::CURLOPT_MAXREDIRS, static_cast<long>(max_redirects));
 }
 
 void CurlEasy::set_connect_timeout(uint32_t seconds) {
@@ -243,6 +245,13 @@ std::string CurlEasy::effective_url() const {
     if (!handle_) return {};
     char* url = nullptr;
     abi::curl_easy_getinfo(handle_, abi::CURLINFO_EFFECTIVE_URL, &url);
+    return url ? std::string(url) : std::string{};
+}
+
+std::string CurlEasy::redirect_url() const {
+    if (!handle_) return {};
+    char* url = nullptr;
+    abi::curl_easy_getinfo(handle_, abi::CURLINFO_REDIRECT_URL, &url);
     return url ? std::string(url) : std::string{};
 }
 

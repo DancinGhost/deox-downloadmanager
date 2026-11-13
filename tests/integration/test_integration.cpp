@@ -606,3 +606,81 @@ DEOXDM_TEST(integration_probe_reports_remote_details) {
     ASSERT_EQ(info->suggested_filename, "named.dat");
     ASSERT_EQ(info->http_status, 200u);
 }
+
+DEOXDM_TEST(integration_custom_headers_stay_with_the_origin) {
+    const auto payload = make_payload(64 * 1024);
+    MockHttpServer target({.payload = payload});
+    // Another port is another origin, just like another host.
+    MockHttpServer origin({.payload = payload, .redirect_location = target.url("/file.bin")});
+    const TempDir dir;
+
+    auto config = make_config(origin.url("/redirect"), dir / "out.bin");
+    config.headers = {"X-Api-Key: secret-token", "Authorization: Bearer secret"};
+    const auto result = DownloadEngine(config).run();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(read_file(dir / "out.bin"), payload);
+
+    ASSERT_FALSE(origin.requests().empty());
+    for (const auto& request : origin.requests()) {
+        ASSERT_TRUE(request.raw.find("X-Api-Key: secret-token\r\n") != std::string::npos);
+    }
+    ASSERT_FALSE(target.requests().empty());
+    for (const auto& request : target.requests()) {
+        ASSERT_TRUE(request.raw.find("secret") == std::string::npos);
+    }
+}
+
+DEOXDM_TEST(integration_custom_headers_follow_same_origin_redirects) {
+    const auto payload = make_payload(1024);
+    MockHttpServer server({.payload = payload});
+    const TempDir dir;
+
+    auto config = make_config(server.url("/redirect"), dir / "out.bin");
+    config.headers = {"X-Api-Key: secret-token"};
+    ASSERT_TRUE(DownloadEngine(config).run().has_value());
+    for (const auto& request : server.requests()) {
+        ASSERT_TRUE(request.raw.find("X-Api-Key: secret-token\r\n") != std::string::npos);
+    }
+}
+
+DEOXDM_TEST(integration_redirect_loop_is_stopped) {
+    MockHttpServer server({.payload = make_payload(1024), .redirect_location = "/redirect"});
+    const TempDir dir;
+
+    const auto result = DownloadEngine(make_config(server.url("/redirect"), dir.path())).run();
+    ASSERT_FALSE(result.has_value());
+    ASSERT_TRUE(result.error().message.find("Too many redirects") != std::string::npos);
+    ASSERT_TRUE(server.requests().size() <= 2 * 11u); // HEAD and ranged GET, 11 requests each
+}
+
+DEOXDM_TEST(integration_redirect_to_another_protocol_is_refused) {
+    MockHttpServer server({.payload = make_payload(1024), .redirect_location = "ftp://127.0.0.1/file.bin"});
+    const TempDir dir;
+
+    const auto result = DownloadEngine(make_config(server.url("/redirect"), dir.path())).run();
+    ASSERT_FALSE(result.has_value());
+    ASSERT_EQ(result.error().code, core::ErrorCode::InvalidUrl);
+}
+
+DEOXDM_TEST(integration_server_cannot_choose_a_hidden_file_name) {
+    MockHttpServer server({.payload = make_payload(1024), .content_disposition = "attachment; filename=\".bashrc\""});
+    const TempDir dir;
+
+    const auto result = DownloadEngine(make_config(server.url(), dir.path())).run();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->output_path, dir / "bashrc");
+    ASSERT_FALSE(std::filesystem::exists(dir / ".bashrc"));
+}
+
+DEOXDM_TEST(integration_derived_name_skips_planted_links) {
+    const auto payload = make_payload(1024);
+    MockHttpServer server({.payload = payload});
+    const TempDir dir;
+    // A dangling link under the name the server will suggest.
+    std::filesystem::create_symlink(dir / "elsewhere.bin", dir / "file.bin");
+
+    const auto result = DownloadEngine(make_config(server.url("/file.bin"), dir.path())).run();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->output_path, dir / "file.1.bin");
+    ASSERT_FALSE(std::filesystem::exists(dir / "elsewhere.bin"));
+}

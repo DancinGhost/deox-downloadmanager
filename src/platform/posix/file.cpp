@@ -3,8 +3,10 @@
 // POSIX implementation of deoxdm/platform/file.hpp (Linux, macOS, BSDs).
 
 #include "deoxdm/platform/file.hpp"
+#include "backend.hpp"
 
 #include <cerrno>
+#include <cstdio>
 #include <fcntl.h>
 #include <limits>
 #include <sys/stat.h>
@@ -69,17 +71,22 @@ void File::close() noexcept {
     }
 }
 
-Result<File> File::open(const std::filesystem::path& path, OpenMode mode) noexcept {
+Result<File> File::open(const std::filesystem::path& path, OpenMode mode, OpenOptions options) noexcept {
     int flags = O_CLOEXEC;
     switch (mode) {
         case OpenMode::CreateTruncate: flags |= O_RDWR | O_CREAT | O_TRUNC; break;
+        case OpenMode::CreateNew:      flags |= O_RDWR | O_CREAT | O_EXCL; break;
         case OpenMode::OpenExisting:   flags |= O_RDWR; break;
         case OpenMode::ReadOnly:       flags |= O_RDONLY; break;
     }
+    if (!options.follow_symlinks) {
+        flags |= O_NOFOLLOW;
+    }
+    const mode_t permissions = options.owner_only ? 0600 : 0644;
 
     int fd = -1;
     do {
-        fd = ::open(path.c_str(), flags, 0644);
+        fd = ::open(path.c_str(), flags, permissions);
     } while (fd < 0 && errno == EINTR);
     if (fd < 0) {
         return last_error();
@@ -203,43 +210,20 @@ Result<void> File::sync() noexcept {
     return {};
 }
 
-std::filesystem::path atomic_temp_path(const std::filesystem::path& path) {
-    return std::filesystem::path(path.string() + ".tmp");
+namespace detail {
+
+void remove_file_quietly(const std::filesystem::path& path) noexcept {
+    ::unlink(path.c_str());
 }
 
-Result<void> write_file_atomically(const std::filesystem::path& path, std::string_view content) noexcept {
-    std::filesystem::path tmp_path;
-    try {
-        tmp_path = atomic_temp_path(path);
-    } catch (...) {
-        return error_from(ENOMEM);
-    }
-
-    auto file = File::open(tmp_path, OpenMode::CreateTruncate);
-    if (!file) {
-        return std::unexpected(file.error());
-    }
-
-    // The data must be on disk before the rename makes it visible, otherwise
-    // a power loss could leave an empty file under the final name.
-    const auto bytes = std::span(reinterpret_cast<const uint8_t*>(content.data()), content.size());
-    auto written = file->write_at(0, bytes);
-    if (written) {
-        written = file->sync();
-    }
-    file->close();
-
-    if (!written) {
-        ::unlink(tmp_path.c_str());
-        return written;
-    }
-    if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
-        const int err = errno;
-        ::unlink(tmp_path.c_str());
-        return error_from(err);
+Result<void> replace_file(const std::filesystem::path& from, const std::filesystem::path& to) noexcept {
+    if (::rename(from.c_str(), to.c_str()) != 0) {
+        return last_error();
     }
     return {};
 }
+
+} // namespace detail
 
 bool is_out_of_space(const std::error_code& error) noexcept {
     if (error.category() != std::system_category() && error.category() != std::generic_category()) {

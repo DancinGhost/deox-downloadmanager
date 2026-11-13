@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Selects the operating-system backend for the platform layer
 # (include/deoxdm/platform/, src/platform/<backend>/).
 #

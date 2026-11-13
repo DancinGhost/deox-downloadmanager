@@ -32,6 +32,7 @@ struct MockServerOptions {
     bool send_content_length{true};  // false: the body ends when the connection closes
     std::string etag{"\"mock-v1\""};
     std::string content_disposition; // sent as-is when not empty
+    std::string redirect_location{"/files/redirected.bin"}; // where /redirect points
 
     // Slow the body down: send `throttle_bytes` at a time, pausing in between.
     size_t throttle_bytes{0};
@@ -50,7 +51,7 @@ struct RecordedRequest {
 };
 
 // Paths:  /missing...         -> 404
-//         /redirect           -> 302 to /files/redirected.bin
+//         /redirect           -> 302 to options.redirect_location
 //         anything else       -> the payload
 class MockHttpServer {
 public:
@@ -239,7 +240,8 @@ private:
         }
         if (record.path == "/redirect") {
             const std::string_view body = is_head ? "" : "moved";
-            send_all(fd, std::format("HTTP/1.1 302 Found\r\nLocation: /files/redirected.bin\r\nContent-Length: 5\r\nConnection: close\r\n\r\n{}", body));
+            send_all(fd, std::format("HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 5\r\nConnection: close\r\n\r\n{}",
+                                     options_.redirect_location, body));
             return;
         }
 

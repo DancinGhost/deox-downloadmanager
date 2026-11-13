@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-#include "download_model.hpp"
+#include "model/download_model.hpp"
 
-#include "download_queue.hpp"
+#include "model/download_queue.hpp"
 
 #include "deoxdm/core/formatting.hpp"
+#include "deoxdm/core/url.hpp"
 
 #include <chrono>
 
@@ -13,6 +14,13 @@ namespace {
 
 QString formatBytes(quint64 bytes) {
     return QString::fromStdString(core::format_bytes(bytes));
+}
+
+// Qt shows a tooltip as HTML when it looks like markup, and URLs and server
+// messages can contain "<b>" or "<img>". Making it explicitly rich text with
+// the content escaped keeps it literal.
+QString plainToolTip(const QString& text) {
+    return QStringLiteral("<p style='white-space:pre'>%1</p>").arg(text.toHtmlEscaped());
 }
 
 } // namespace
@@ -76,15 +84,17 @@ QVariant DownloadModel::data(const QModelIndex& index, int role) const {
 
     if (role == Qt::ToolTipRole) {
         switch (index.column()) {
-            case NameColumn:
-                return task->outputPath().isEmpty()
-                    ? task->spec().url
-                    : QStringLiteral("%1\n%2").arg(task->outputPath(), task->spec().url);
+            case NameColumn: {
+                const QString url = QString::fromStdString(core::redact_credentials(task->spec().url.toStdString()));
+                return plainToolTip(task->outputPath().isEmpty()
+                    ? url
+                    : QStringLiteral("%1\n%2").arg(task->outputPath(), url));
+            }
             case StatusColumn:
                 if (task->status() == TaskStatus::Paused && !task->isResumable()) {
                     return tr("This server cannot continue a partial download. Resuming starts over.");
                 }
-                return task->statusText();
+                return plainToolTip(task->statusText());
             default:
                 return {};
         }

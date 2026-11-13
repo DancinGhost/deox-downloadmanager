@@ -9,7 +9,9 @@
 //
 // Errors are reported as std::error_code in std::system_category(), i.e. the
 // native error number (errno on POSIX, GetLastError() on Windows), so callers
-// can print error.message() without knowing the platform.
+// can print error.message() without knowing the platform. Conditions that are
+// not the operating system's (running out of memory) use
+// std::generic_category().
 
 #include <cstddef>
 #include <cstdint>
@@ -26,8 +28,20 @@ using Result = std::expected<T, std::error_code>;
 
 enum class OpenMode {
     CreateTruncate, // read/write; create the file or discard its content
+    CreateNew,      // read/write; create the file, fail if anything (even a symbolic link) has that name
     OpenExisting,   // read/write; the file must exist, content is kept
     ReadOnly        // read only; the file must exist
+};
+
+struct OpenOptions {
+    // false: fail instead of opening the target when the last component of
+    // the path is a symbolic link (or, on Windows, another reparse point).
+    // Use it for names that are not the user's own choice.
+    bool follow_symlinks{true};
+    // A newly created file can be read and written by its owner only
+    // (POSIX mode 0600). Existing files keep their permissions. Ignored on
+    // Windows, where new files inherit the directory's access rules.
+    bool owner_only{false};
 };
 
 // An open file with positional (offset-based) I/O.
@@ -51,7 +65,7 @@ public:
     File(File&& other) noexcept;
     File& operator=(File&& other) noexcept;
 
-    [[nodiscard]] static Result<File> open(const std::filesystem::path& path, OpenMode mode) noexcept;
+    [[nodiscard]] static Result<File> open(const std::filesystem::path& path, OpenMode mode, OpenOptions options = {}) noexcept;
 
     // Writes all of `data` at `offset`, retrying short writes.
     [[nodiscard]] Result<void> write_at(uint64_t offset, std::span<const uint8_t> data) noexcept;
@@ -89,7 +103,9 @@ private:
 // Replaces `path` with `content` atomically: the data is written to a
 // temporary file in the same directory, flushed to disk and renamed over the
 // target. Readers see either the old or the new content, never a mix, even
-// after a crash or power loss.
+// after a crash or power loss. The temporary file is created exclusively and
+// never through a symbolic link; on POSIX the result is readable by its owner
+// only.
 [[nodiscard]] Result<void> write_file_atomically(const std::filesystem::path& path, std::string_view content) noexcept;
 
 // The name of the temporary file write_file_atomically() uses for `path`.

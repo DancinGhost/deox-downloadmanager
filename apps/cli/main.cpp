@@ -6,14 +6,15 @@
 #include "terminal_ui.hpp"
 
 #include "deoxdm/engine/download_engine.hpp"
+#include "deoxdm/platform/interrupt.hpp"
 #include "deoxdm/version.hpp"
 
-#include <atomic>
+#include <algorithm>
 #include <chrono>
-#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -26,32 +27,15 @@ constexpr int kExitFailure = 1;
 constexpr int kExitUsage = 2;
 constexpr int kExitInterrupted = 130;
 
-// A signal handler may do very little. It only raises a flag; a helper thread
-// turns the flag into a stop request.
-std::atomic<bool> g_interrupted{false};
-static_assert(std::atomic<bool>::is_always_lock_free);
-
-extern "C" void handle_signal(int signal_number) {
-    g_interrupted.store(true, std::memory_order_relaxed);
-    // A second Ctrl-C terminates immediately instead of waiting for a clean stop.
-    std::signal(signal_number, SIG_DFL);
-}
-
-bool read_url_file(const std::string& name, std::vector<std::string>& urls) {
-    std::string content;
+std::optional<std::string> read_text_file(const std::string& name) {
     if (name == "-") {
-        content.assign(std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>());
-    } else {
-        std::ifstream file(name, std::ios::binary);
-        if (!file) {
-            return false;
-        }
-        content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        return std::string(std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>());
     }
-    for (auto& url : deoxdm::cli::parse_url_list(content)) {
-        urls.push_back(std::move(url));
+    std::ifstream file(name, std::ios::binary);
+    if (!file) {
+        return std::nullopt;
     }
-    return true;
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
 } // namespace
@@ -85,11 +69,34 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (std::ranges::count(options.input_files, std::string("-")) + std::ranges::count(options.header_files, std::string("-")) > 1) {
+        std::cerr << program_name << ": standard input can only be read once\n";
+        return kExitUsage;
+    }
+
+    for (const auto& file : options.header_files) {
+        const auto content = read_text_file(file);
+        if (!content) {
+            std::cerr << program_name << ": cannot read header file '" << file << "'\n";
+            return kExitUsage;
+        }
+        auto headers = deoxdm::cli::parse_header_list(*content);
+        if (!headers) {
+            std::cerr << program_name << ": invalid header file '" << file << "', " << headers.error() << "\n";
+            return kExitUsage;
+        }
+        options.config.headers.insert(options.config.headers.end(), headers->begin(), headers->end());
+    }
+
     std::vector<std::string> urls = std::move(options.urls);
     for (const auto& file : options.input_files) {
-        if (!read_url_file(file, urls)) {
+        const auto content = read_text_file(file);
+        if (!content) {
             std::cerr << program_name << ": cannot read URL list '" << file << "'\n";
             return kExitUsage;
+        }
+        for (auto& url : deoxdm::cli::parse_url_list(*content)) {
+            urls.push_back(std::move(url));
         }
     }
     if (urls.empty()) {
@@ -97,13 +104,15 @@ int main(int argc, char* argv[]) {
         return kExitUsage;
     }
 
-    std::signal(SIGINT, handle_signal);
-    std::signal(SIGTERM, handle_signal);
+    // Ctrl-C and termination requests stop the downloads cleanly, so they can
+    // be resumed. The handler only sets a flag; this thread turns it into a
+    // stop request.
+    deoxdm::platform::install_interrupt_handler();
 
     std::stop_source stop_source;
     std::jthread signal_watcher([&stop_source](const std::stop_token& watcher_stop) {
         while (!watcher_stop.stop_requested()) {
-            if (g_interrupted.load(std::memory_order_relaxed)) {
+            if (deoxdm::platform::interrupt_requested()) {
                 stop_source.request_stop();
                 return;
             }

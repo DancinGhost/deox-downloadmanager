@@ -26,4 +26,14 @@ namespace deoxdm::core {
 // optional trailing "B"/"iB") into bytes.
 [[nodiscard]] std::optional<uint64_t> parse_byte_size(std::string_view text) noexcept;
 
+// Length in bytes of a character at `pos` that must not reach a file name or
+// a terminal as it is: C0/C1 control characters (terminal escape sequences)
+// and Unicode bidirectional controls (names that display differently from
+// what they are). Returns 0 for anything else. `text` is UTF-8.
+[[nodiscard]] size_t unsafe_character_length(std::string_view text, size_t pos) noexcept;
+
+// `text` with every character unsafe_character_length() flags replaced by
+// '?', for printing text that came from a server or a file to a terminal.
+[[nodiscard]] std::string printable_text(std::string_view text);
+
 } // namespace deoxdm::core

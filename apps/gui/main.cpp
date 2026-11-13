@@ -2,11 +2,11 @@
 //
 // deox-dm-gui: Qt 6 desktop front end of Deox Download Manager.
 
-#include "add_dialog.hpp"
-#include "app_settings.hpp"
-#include "download_queue.hpp"
-#include "icons.hpp"
-#include "main_window.hpp"
+#include "views/add_dialog.hpp"
+#include "model/app_settings.hpp"
+#include "model/download_queue.hpp"
+#include "views/icons.hpp"
+#include "views/main_window.hpp"
 
 #include "deoxdm/version.hpp"
 

@@ -38,7 +38,6 @@ public:
     void set_url(const std::string& url);
     void set_range(const std::string& range_spec); // "0-499" or "500-"
     void set_nobody(bool nobody);                  // true: HEAD request
-    void set_follow_redirects(uint32_t max_redirects);
     void set_connect_timeout(uint32_t seconds);    // 0 = libcurl default
     void set_total_timeout(uint32_t seconds);      // 0 = no limit
     void set_stall_timeout(uint32_t seconds);      // abort when no data arrives for this long; 0 = never
@@ -58,10 +57,16 @@ public:
     [[nodiscard]] uint32_t response_code() const noexcept;
     [[nodiscard]] std::optional<uint64_t> content_length() const noexcept;
     [[nodiscard]] std::string effective_url() const;
+    // Where a 3xx response points, resolved against the request URL; empty
+    // when the last response was not a redirect. Redirects are never
+    // followed automatically.
+    [[nodiscard]] std::string redirect_url() const;
 
 private:
+    // Returns whether libcurl accepted the option. A failed non-optional
+    // option is remembered and reported by perform().
     template <typename T>
-    void setopt(int option, T value, bool optional = false) noexcept;
+    bool setopt(int option, T value, bool optional = false) noexcept;
 
     static size_t static_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) noexcept;
     static size_t static_header_cb(char* buffer, size_t size, size_t nitems, void* userdata) noexcept;
