@@ -92,6 +92,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=g++-14 \
           -DCMAKE_C_COMPILER=gcc-14 \
           -DDEOXDM_BUILD_GUI=ON \
+          -DDEOXDM_BUILD_ID="canary-${GITHUB_SHA::7}" \
           -DBUILD_TESTING=OFF
 
     - name: Build
@@ -101,7 +102,7 @@ jobs:
       run: |
         mkdir -p dist
         cmake --install build --strip --prefix "$PWD/stage/$PACKAGE"
-        ./stage/$PACKAGE/bin/deox-dm --help
+        ./stage/$PACKAGE/bin/deox-dm --version
         tar -C stage -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
         (cd dist && sha256sum -- * > SHA256SUMS)
         cat dist/SHA256SUMS
@@ -123,7 +124,7 @@ jobs:
           echo '```'
           echo "sha256sum -c SHA256SUMS"
           echo "tar -xzf $PACKAGE.tar.gz"
-          echo "./$PACKAGE/bin/deox-dm --help"
+          echo "./$PACKAGE/bin/deox-dm --version"
           echo '```'
         } > notes.md
 

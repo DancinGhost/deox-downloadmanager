@@ -109,7 +109,7 @@ DEOXDM_TEST(cli_help_and_version_need_no_url) {
     ASSERT_TRUE(parse({"--version"})->show_version);
     ASSERT_TRUE(parse({"-V"})->show_version);
     ASSERT_TRUE(help_text("deox-dm").find("--connections") != std::string::npos);
-    ASSERT_TRUE(version_text().starts_with("deox-dm "));
+    ASSERT_TRUE(version_text().starts_with("deox-dm canary"));
 }
 
 DEOXDM_TEST(cli_url_list_parsing) {

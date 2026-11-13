@@ -1,12 +1,7 @@
 # SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.20)
 
-# The version lives in one place: include/deoxdm/version.hpp
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/deoxdm/version.hpp" _deoxdm_version_line REGEX "VERSION_STRING = \"")
-string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" DEOXDM_VERSION "${_deoxdm_version_line}")
-
 project(deox_downloadmanager
-    VERSION ${DEOXDM_VERSION}
     DESCRIPTION "Deox Download Manager: segmented, resumable HTTP(S) download manager"
     HOMEPAGE_URL "https://github.com/DancinGhost/deox-downloadmanager"
     LANGUAGES CXX
@@ -45,6 +40,36 @@ if(ENABLE_TSAN)
     set(DEOXDM_ENABLE_TSAN ON)
 endif()
 
+# ---------------------------------------------------------------------------
+# Build identifier. There are no numbered releases yet: every build is a
+# canary named after its commit ("canary-1a2b3c4"), or plain "canary" outside
+# a git checkout. The commit is read when CMake configures, so re-run CMake
+# after committing to refresh it. CI passes -DDEOXDM_BUILD_ID explicitly.
+# ---------------------------------------------------------------------------
+set(DEOXDM_BUILD_ID "" CACHE STRING "Build identifier shown by --version and in the User-Agent (default: canary-<short commit>)")
+set(_deoxdm_build_id "${DEOXDM_BUILD_ID}")
+if(NOT _deoxdm_build_id)
+    set(_deoxdm_build_id "canary")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" rev-parse --short=7 HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _deoxdm_commit
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _deoxdm_git_result)
+        if(_deoxdm_git_result EQUAL 0 AND _deoxdm_commit)
+            set(_deoxdm_build_id "canary-${_deoxdm_commit}")
+        endif()
+    endif()
+endif()
+# It ends up in a C++ string literal and an HTTP User-Agent token.
+if(NOT _deoxdm_build_id MATCHES "^[A-Za-z0-9._+-]+$")
+    message(FATAL_ERROR "DEOXDM_BUILD_ID may only contain letters, digits and . _ + -")
+endif()
+add_compile_definitions(DEOXDM_BUILD_ID="${_deoxdm_build_id}")
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(DeoxdmCompilerOptions)
 include(DeoxdmPlatform)
@@ -76,5 +101,5 @@ endif()
 
 add_subdirectory(packaging)
 
-message(STATUS "Deox Download Manager ${PROJECT_VERSION}: platform backend '${DEOXDM_PLATFORM_BACKEND}', "
+message(STATUS "Deox Download Manager ${_deoxdm_build_id}: platform backend '${DEOXDM_PLATFORM_BACKEND}', "
                "CLI ${DEOXDM_BUILD_CLI}, GUI ${DEOXDM_GUI_ENABLED}, tests ${BUILD_TESTING}")

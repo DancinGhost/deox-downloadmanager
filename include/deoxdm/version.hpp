@@ -3,17 +3,19 @@
 
 #include <string_view>
 
+// There are no numbered releases yet: every build is a canary, identified by
+// the commit it was built from. The build system defines DEOXDM_BUILD_ID
+// (e.g. "canary-1a2b3c4"); a build without it is plain "canary".
+#ifndef DEOXDM_BUILD_ID
+#define DEOXDM_BUILD_ID "canary"
+#endif
+
 // Project identity. Every user-visible name is defined here so the CLI, the
 // desktop application and the network layer agree on them.
 namespace deoxdm {
 
-// The build system reads the version from this header; keep the three numbers
-// and the string in sync.
-inline constexpr int VERSION_MAJOR = 1;
-inline constexpr int VERSION_MINOR = 1;
-inline constexpr int VERSION_PATCH = 0;
-
-inline constexpr std::string_view VERSION_STRING = "1.1.0";
+// Shown by --version, in the About dialog and in the User-Agent header.
+inline constexpr std::string_view VERSION_STRING = DEOXDM_BUILD_ID;
 
 // Human-readable product name.
 inline constexpr std::string_view PROJECT_NAME = "Deox Download Manager";
@@ -29,7 +31,7 @@ inline constexpr std::string_view GUI_EXECUTABLE = "deox-dm-gui";
 // per-user settings/data directories.
 inline constexpr std::string_view APPLICATION_ID = "io.github.DancinGhost.DeoxDownloadManager";
 
-// Product token sent in the default User-Agent header ("deox-dm/1.1.0").
+// Product token sent in the default User-Agent header ("deox-dm/canary-1a2b3c4").
 inline constexpr std::string_view USER_AGENT_PRODUCT = CLI_EXECUTABLE;
 
 // Suffix of the checkpoint file kept next to an unfinished download.
