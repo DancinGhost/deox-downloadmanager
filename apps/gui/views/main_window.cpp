@@ -22,6 +22,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
@@ -85,7 +86,9 @@ MainWindow::MainWindow(DownloadQueue* queue, QWidget* parent)
         tr("<h3>No downloads yet</h3>"
            "<p>Click <b>Add</b>, paste a link with Ctrl+V,<br>or drop a link onto this window.</p>"), this);
     emptyLabel->setAlignment(Qt::AlignCenter);
-    emptyLabel->setEnabled(false); // rendered in the theme's muted text colour
+    QPalette emptyPalette = emptyLabel->palette();
+    emptyPalette.setColor(QPalette::WindowText, emptyPalette.color(QPalette::PlaceholderText));
+    emptyLabel->setPalette(emptyPalette);
 
     stack_ = new QStackedWidget(this);
     stack_->addWidget(emptyLabel);
@@ -101,8 +104,10 @@ MainWindow::MainWindow(DownloadQueue* queue, QWidget* parent)
     connect(view_, &QTreeView::doubleClicked, this, [this] { openSelectedFile(); });
     connect(view_->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MainWindow::updateActions);
 
-    connect(queue_, &DownloadQueue::taskChanged, this, [this] {
-        updateActions();
+    connect(queue_, &DownloadQueue::taskChanged, this, [this](int row) {
+        if (view_->selectionModel()->isRowSelected(row, {})) {
+            updateActions();
+        }
         updateStatusBar();
     });
     connect(queue_, &DownloadQueue::taskAdded, this, [this] {
@@ -139,11 +144,13 @@ void MainWindow::createActions() {
     connect(addAction_, &QAction::triggered, this, &MainWindow::addFromClipboardOrPrompt);
 
     resumeAction_ = new QAction(actionIcon(Glyph::Resume, pal), tr("&Resume"), this);
-    resumeAction_->setToolTip(tr("Resume or retry the selected downloads"));
+    resumeAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+    resumeAction_->setToolTip(tr("Resume or retry the selected downloads (Ctrl+R)"));
     connect(resumeAction_, &QAction::triggered, this, &MainWindow::resumeSelected);
 
     pauseAction_ = new QAction(actionIcon(Glyph::Pause, pal), tr("&Pause"), this);
-    pauseAction_->setToolTip(tr("Pause the selected downloads"));
+    pauseAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+    pauseAction_->setToolTip(tr("Pause the selected downloads (Ctrl+P)"));
     connect(pauseAction_, &QAction::triggered, this, &MainWindow::pauseSelected);
 
     removeAction_ = new QAction(actionIcon(Glyph::Remove, pal), tr("Re&move"), this);
@@ -152,7 +159,8 @@ void MainWindow::createActions() {
     connect(removeAction_, &QAction::triggered, this, &MainWindow::removeSelected);
 
     openFileAction_ = new QAction(actionIcon(Glyph::OpenFile, pal), tr("&Open"), this);
-    openFileAction_->setToolTip(tr("Open the downloaded file"));
+    openFileAction_->setShortcut(QKeySequence(Qt::Key_Return));
+    openFileAction_->setToolTip(tr("Open the downloaded file (Enter)"));
     connect(openFileAction_, &QAction::triggered, this, &MainWindow::openSelectedFile);
 
     openFolderAction_ = new QAction(actionIcon(Glyph::OpenFolder, pal), tr("Show in &Folder"), this);
@@ -164,16 +172,43 @@ void MainWindow::createActions() {
     connect(copyUrlAction_, &QAction::triggered, this, &MainWindow::copySelectedUrls);
 
     settingsAction_ = new QAction(actionIcon(Glyph::Settings, pal), tr("&Settings"), this);
-    settingsAction_->setToolTip(tr("Download folder, connections and limits"));
+    settingsAction_->setShortcut(QKeySequence::Preferences);
+    settingsAction_->setToolTip(tr("Download folder, connections and limits (Ctrl+,)"));
     connect(settingsAction_, &QAction::triggered, this, &MainWindow::showSettings);
 
     aboutAction_ = new QAction(tr("&About"), this);
-    aboutAction_->setToolTip(tr("Version, license and third-party notices"));
+    aboutAction_->setShortcut(QKeySequence::HelpContents);
+    aboutAction_->setToolTip(tr("Version, license and third-party notices (F1)"));
     connect(aboutAction_, &QAction::triggered, this, &MainWindow::showAbout);
 
-    auto* pasteAction = new QAction(tr("Paste Address"), this);
+    auto* pasteAction = new QAction(tr("&Paste Address"), this);
     pasteAction->setShortcut(QKeySequence::Paste);
     connect(pasteAction, &QAction::triggered, this, &MainWindow::pasteUrls);
+
+    auto* quitAction = new QAction(tr("&Quit"), this);
+    quitAction->setShortcut(QKeySequence::Quit);
+    connect(quitAction, &QAction::triggered, this, &QWidget::close);
+
+    QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
+    fileMenu->addAction(addAction_);
+    fileMenu->addAction(pasteAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(settingsAction_);
+    fileMenu->addSeparator();
+    fileMenu->addAction(quitAction);
+
+    QMenu* downloadsMenu = menuBar()->addMenu(tr("&Downloads"));
+    downloadsMenu->addAction(resumeAction_);
+    downloadsMenu->addAction(pauseAction_);
+    downloadsMenu->addSeparator();
+    downloadsMenu->addAction(openFileAction_);
+    downloadsMenu->addAction(openFolderAction_);
+    downloadsMenu->addAction(copyUrlAction_);
+    downloadsMenu->addSeparator();
+    downloadsMenu->addAction(removeAction_);
+
+    QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
+    helpMenu->addAction(aboutAction_);
 
     // Shortcuts work wherever the focus is inside the window.
     addActions({pasteAction, copyUrlAction_});
@@ -290,8 +325,12 @@ void MainWindow::promptForDownloads(const QStringList& urls) {
 }
 
 void MainWindow::addFromClipboardOrPrompt() {
-    // Offer what is on the clipboard: most downloads start with a copied link.
-    promptForDownloads(AddDialog::extractUrls(QApplication::clipboard()->text()));
+    // Offer what is on the clipboard unless it is already in the download queue.
+    QStringList urls = AddDialog::extractUrls(QApplication::clipboard()->text());
+    for (int i = 0; i < queue_->count(); ++i) {
+        urls.removeAll(queue_->at(i)->spec().url);
+    }
+    promptForDownloads(urls);
 }
 
 void MainWindow::pasteUrls() {
@@ -337,10 +376,9 @@ void MainWindow::removeSelected() {
     }
 
     auto* deleteFiles = new QCheckBox(tr("Also delete the files from disk"), &box);
-    // A partial file is of little use once it is off the list.
-    deleteFiles->setChecked(std::ranges::all_of(tasks, [](const DownloadTask* task) {
-        return task->status() != TaskStatus::Completed;
-    }));
+    // Default to keeping files on disk so a quick confirmation never causes
+    // accidental data loss of completed or resumable partial downloads.
+    deleteFiles->setChecked(false);
     box.setCheckBox(deleteFiles);
 
     QAbstractButton* removeButton = box.addButton(tr("Remove"), QMessageBox::AcceptRole);

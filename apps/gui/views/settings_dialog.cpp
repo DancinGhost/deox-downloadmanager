@@ -19,7 +19,8 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, QWidget* parent)
     setMinimumWidth(480);
 
     directoryEdit_ = new QLineEdit(settings.downloadDirectory, this);
-    auto* browseButton = new QPushButton(tr("Browse…"), this);
+    auto* browseButton = new QPushButton(tr("&Browse…"), this);
+    browseButton->setAccessibleName(tr("Browse for default download folder"));
     auto* directoryRow = new QHBoxLayout;
     directoryRow->addWidget(directoryEdit_, 1);
     directoryRow->addWidget(browseButton);
@@ -57,7 +58,9 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, QWidget* parent)
     form->addRow(tr("Give up on a stalled connection &after:"), timeoutSpin_);
 
     auto* note = new QLabel(tr("Changes apply to downloads that start from now on."), this);
-    note->setEnabled(false);
+    QPalette notePalette = note->palette();
+    notePalette.setColor(QPalette::WindowText, notePalette.color(QPalette::PlaceholderText));
+    note->setPalette(notePalette);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
 

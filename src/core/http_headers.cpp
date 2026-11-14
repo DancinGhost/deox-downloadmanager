@@ -78,6 +78,10 @@ std::optional<ContentRange> parse_content_range(std::string_view value) noexcept
 }
 
 void ResponseHeaders::feed(std::string_view line) noexcept {
+    constexpr size_t kMaxHeaderLineBytes = 8192;
+    if (line.size() > kMaxHeaderLineBytes) {
+        line = line.substr(0, kMaxHeaderLineBytes);
+    }
     line = trim(line);
 
     if (line.starts_with("HTTP/")) {

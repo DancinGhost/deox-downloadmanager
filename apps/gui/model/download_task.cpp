@@ -178,7 +178,7 @@ QString DownloadTask::displayName() const {
     if (const auto url = core::parse_url(spec_.url.toStdString())) {
         return QString::fromStdString(url->filename);
     }
-    return spec_.url;
+    return QString::fromStdString(core::redact_credentials(spec_.url.toStdString()));
 }
 
 QString DownloadTask::statusText() const {

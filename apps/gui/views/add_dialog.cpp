@@ -4,6 +4,7 @@
 #include "deoxdm/core/checksum.hpp"
 #include "deoxdm/core/url.hpp"
 
+#include <QAccessible>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -30,7 +31,8 @@ AddDialog::AddDialog(const AppSettings& settings, QWidget* parent)
     urlEdit_->setFixedHeight(urlEdit_->fontMetrics().lineSpacing() * 6);
 
     directoryEdit_ = new QLineEdit(settings.downloadDirectory, this);
-    auto* browseButton = new QPushButton(tr("Browse…"), this);
+    auto* browseButton = new QPushButton(tr("&Browse…"), this);
+    browseButton->setAccessibleName(tr("Browse for download folder"));
     auto* directoryRow = new QHBoxLayout;
     directoryRow->addWidget(directoryEdit_, 1);
     directoryRow->addWidget(browseButton);
@@ -74,6 +76,7 @@ AddDialog::AddDialog(const AppSettings& settings, QWidget* parent)
 
 void AddDialog::setUrls(const QStringList& urls) {
     urlEdit_->setPlainText(urls.join('\n'));
+    urlEdit_->selectAll();
 }
 
 QStringList AddDialog::extractUrls(const QString& text) {
@@ -120,8 +123,13 @@ void AddDialog::validate() {
         problem = tr("Choose a folder to save to.");
     }
 
+    const bool changed = messageLabel_->text() != problem;
     messageLabel_->setText(problem);
     messageLabel_->setVisible(!problem.isEmpty());
+    if (changed && !problem.isEmpty() && QAccessible::isActive()) {
+        QAccessibleValueChangeEvent event(messageLabel_, problem);
+        QAccessible::updateAccessibility(&event);
+    }
     buttons_->button(QDialogButtonBox::Ok)->setEnabled(problem.isEmpty() && valid > 0);
 }
 

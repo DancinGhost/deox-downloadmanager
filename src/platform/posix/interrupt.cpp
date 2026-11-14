@@ -11,9 +11,16 @@ namespace deoxdm::platform {
 
 namespace {
 
-// A signal handler may do very little: it only raises the flag.
-extern "C" void handle_stop_signal(int /*signal_number*/) {
-    detail::g_interrupt_requested.store(true, std::memory_order_relaxed);
+// A signal handler may do very little: it only raises the flag, or terminates
+// immediately if a stop was already requested by an earlier signal.
+extern "C" void handle_stop_signal(int signal_number) {
+    if (detail::g_interrupt_requested.exchange(true, std::memory_order_relaxed)) {
+        struct sigaction dfl{};
+        dfl.sa_handler = SIG_DFL;
+        sigemptyset(&dfl.sa_mask);
+        ::sigaction(signal_number, &dfl, nullptr);
+        ::raise(signal_number);
+    }
 }
 
 void install(int signal_number, bool keep_if_ignored) noexcept {

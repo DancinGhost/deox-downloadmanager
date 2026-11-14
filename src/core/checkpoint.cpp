@@ -36,6 +36,17 @@ std::unexpected<Error> corrupted(std::string message) {
     return std::unexpected(Error{ErrorCode::StateCorrupted, std::move(message)});
 }
 
+std::string sanitize_line_value(std::string_view value) {
+    std::string clean;
+    clean.reserve(value.size());
+    for (const char ch : value) {
+        if (ch != '\r' && ch != '\n') {
+            clean.push_back(ch);
+        }
+    }
+    return clean;
+}
+
 } // namespace
 
 std::string serialize_checkpoint(const ResumeData& data) noexcept {
@@ -43,11 +54,11 @@ std::string serialize_checkpoint(const ResumeData& data) noexcept {
     out.reserve(256 + data.url.size() + data.chunks.size() * 64);
 
     out += "# DEOX DOWNLOAD MANAGER CHECKPOINT v1\n";
-    out += "url=" + data.url + "\n";
+    out += "url=" + sanitize_line_value(data.url) + "\n";
     out += "total_size=" + std::to_string(data.total_size) + "\n";
-    out += "etag=" + data.etag + "\n";
-    out += "last_modified=" + data.last_modified + "\n";
-    out += "output_file=" + data.output_file + "\n";
+    out += "etag=" + sanitize_line_value(data.etag) + "\n";
+    out += "last_modified=" + sanitize_line_value(data.last_modified) + "\n";
+    out += "output_file=" + sanitize_line_value(data.output_file) + "\n";
     out += "chunks_count=" + std::to_string(data.chunks.size()) + "\n";
 
     for (const auto& ch : data.chunks) {

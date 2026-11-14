@@ -24,7 +24,7 @@ applications.
 | `src/engine/` | No | Uses `deoxdm/platform/*.hpp` for files, paths. |
 | `apps/cli/` | No | Uses `deoxdm/platform/*.hpp` for the terminal and Ctrl-C. |
 | `apps/gui/` | No | Qt provides the platform services (paths, opening files, dialogs). |
-| `tests/` | Avoid | Exception: `tests/support/mock_http_server.hpp` uses BSD sockets. |
+| `tests/` | Avoid | Exception: `tests/support/mock_http_server.cpp` uses BSD sockets. |
 
 To check this rule, search for OS headers outside `src/platform/`:
 
@@ -84,7 +84,7 @@ error messages, checkpoint files, `QString`. On POSIX they are plain copies.
    - the primitives in `src/platform/backend.hpp` (`remove_file_quietly`,
      `replace_file`, and setting `detail::g_interrupt_requested`).
 2. Select it in `cmake/DeoxdmPlatform.cmake`.
-3. Run `deoxdm_tests`. `tests/unit/test_platform.cpp` checks the contracts
+3. Run `deoxdm_unit_tests`. `tests/unit/test_platform.cpp` checks the contracts
    every backend must meet (positional I/O, atomic writes, UTF-8 file names,
    interrupts).
 
@@ -109,7 +109,7 @@ The POSIX backend already contains the macOS-specific calls
   Embed an application manifest with `<activeCodePage>UTF-8</activeCodePage>`
   (Windows 10 1903+), or use `wmain`, and call `SetConsoleOutputCP(CP_UTF8)`
   so non-ASCII file names print correctly.
-- **Integration tests.** `tests/support/mock_http_server.hpp` uses BSD sockets
+- **Integration tests.** `tests/support/mock_http_server.cpp` uses BSD sockets
   and needs a small Winsock shim (`WSAStartup`, `closesocket`, `SOCKET`).
   Until then `tests/CMakeLists.txt` builds the integration and GUI tests on
   UNIX only.

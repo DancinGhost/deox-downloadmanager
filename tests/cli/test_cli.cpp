@@ -34,7 +34,7 @@ DEOXDM_TEST(cli_defaults) {
 
 DEOXDM_TEST(cli_all_options) {
     const auto options = parse({
-        "-c", "16", "--timeout=5", "-r", "0", "-l", "2M", "-k", "--no-resume", "--overwrite", "-q",
+        "-c", "16", "--timeout=5", "-r", "0", "-l", "2M", "--max-size", "100M", "-k", "--no-resume", "--overwrite", "-q",
         "-s", "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
         "-H", "Authorization: Bearer abc", "--header", "X-Test: 1", "-A", "agent/1.0",
         "-o", "out.bin", "https://example.com/a.bin"
@@ -44,6 +44,7 @@ DEOXDM_TEST(cli_all_options) {
     ASSERT_EQ(options->config.timeout_seconds, 5u);
     ASSERT_EQ(options->config.max_retries, 0u);
     ASSERT_EQ(options->config.max_speed_bps, 2u * 1024 * 1024);
+    ASSERT_EQ(options->config.max_file_size, 100u * 1024 * 1024);
     ASSERT_TRUE(options->config.allow_insecure_tls);
     ASSERT_FALSE(options->config.resume_enabled);
     ASSERT_TRUE(options->config.overwrite);
@@ -96,6 +97,8 @@ DEOXDM_TEST(cli_rejects_bad_input) {
     ASSERT_FALSE(parse({"-t", "soon", "https://example.com/a"}).has_value());
     ASSERT_FALSE(parse({"-r", "many", "https://example.com/a"}).has_value());
     ASSERT_FALSE(parse({"-l", "fast", "https://example.com/a"}).has_value());
+    ASSERT_FALSE(parse({"--max-size", "huge", "https://example.com/a"}).has_value());
+    ASSERT_FALSE(parse({"--max-size", "0", "https://example.com/a"}).has_value());
     ASSERT_FALSE(parse({"-s", "abc123", "https://example.com/a"}).has_value());
     ASSERT_FALSE(parse({"-H", "NoColonHere", "https://example.com/a"}).has_value());
     ASSERT_FALSE(parse({"-H", "X: 1\r\nY: 2", "https://example.com/a"}).has_value());

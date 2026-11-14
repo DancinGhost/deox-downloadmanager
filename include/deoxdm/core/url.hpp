@@ -23,6 +23,14 @@ struct Url {
 // Parses and validates an absolute http(s) URL. Any fragment is dropped.
 [[nodiscard]] std::expected<Url, Error> parse_url(std::string_view raw_url) noexcept;
 
+// Whether two parsed URLs share the same scheme, host (case-insensitive) and port.
+[[nodiscard]] bool same_origin(const Url& a, const Url& b) noexcept;
+
+// Whether `host` names a loopback, link-local, or private-network address
+// (e.g. localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+// 169.254.0.0/16, [::1], [fe80::]/10, [fc00::]/7).
+[[nodiscard]] bool is_loopback_or_private_host(std::string_view host) noexcept;
+
 // Decodes %XX escapes. Malformed escapes are kept verbatim.
 [[nodiscard]] std::string percent_decode(std::string_view text) noexcept;
 

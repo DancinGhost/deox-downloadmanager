@@ -82,6 +82,19 @@ QVariant DownloadModel::data(const QModelIndex& index, int role) const {
         }
     }
 
+    if (role == Qt::AccessibleTextRole) {
+        if (index.column() == ProgressColumn) {
+            if (task->status() == TaskStatus::Completed) {
+                return QStringLiteral("100%");
+            }
+            if (task->totalBytes() && *task->totalBytes() > 0) {
+                return QStringLiteral("%1%").arg(task->progressRatio() * 100.0, 0, 'f', 1);
+            }
+            return task->statusText();
+        }
+        return data(index, Qt::DisplayRole);
+    }
+
     if (role == Qt::ToolTipRole) {
         switch (index.column()) {
             case NameColumn: {

@@ -50,7 +50,36 @@ CurlEasy::CurlEasy() {
     if (!handle_) {
         return;
     }
+    configure_defaults();
+}
 
+CurlEasy::~CurlEasy() {
+    if (handle_) {
+        abi::curl_easy_cleanup(handle_);
+    }
+    if (header_list_) {
+        abi::curl_slist_free_all(static_cast<abi::curl_slist*>(header_list_));
+    }
+}
+
+void CurlEasy::reset() {
+    if (!handle_) {
+        return;
+    }
+    abi::curl_easy_reset(handle_);
+    if (header_list_) {
+        abi::curl_slist_free_all(static_cast<abi::curl_slist*>(header_list_));
+        header_list_ = nullptr;
+    }
+    setopt_error_ = 0;
+    error_buffer_[0] = '\0';
+    write_cb_ = {};
+    header_cb_ = {};
+    progress_cb_ = {};
+    configure_defaults();
+}
+
+void CurlEasy::configure_defaults() {
     setopt(abi::CURLOPT_NOSIGNAL, 1L); // required for multi-threaded use
     setopt(abi::CURLOPT_ERRORBUFFER, error_buffer_.data());
     setopt(abi::CURLOPT_BUFFERSIZE, 128L * 1024L);
@@ -65,15 +94,6 @@ CurlEasy::CurlEasy() {
         setopt(abi::CURLOPT_REDIR_PROTOCOLS, http_only);
     }
     set_user_agent(std::format("{}/{}", USER_AGENT_PRODUCT, VERSION_STRING));
-}
-
-CurlEasy::~CurlEasy() {
-    if (handle_) {
-        abi::curl_easy_cleanup(handle_);
-    }
-    if (header_list_) {
-        abi::curl_slist_free_all(static_cast<abi::curl_slist*>(header_list_));
-    }
 }
 
 template <typename T>
@@ -91,7 +111,7 @@ void CurlEasy::set_url(const std::string& url) {
 }
 
 void CurlEasy::set_range(const std::string& range_spec) {
-    setopt(abi::CURLOPT_RANGE, range_spec.c_str());
+    setopt(abi::CURLOPT_RANGE, range_spec.empty() ? nullptr : range_spec.c_str());
 }
 
 void CurlEasy::set_nobody(bool nobody) {

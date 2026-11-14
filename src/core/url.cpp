@@ -372,4 +372,88 @@ std::expected<Url, Error> parse_url(std::string_view raw_url) noexcept {
     return url;
 }
 
+bool same_origin(const Url& a, const Url& b) noexcept {
+    return a.scheme == b.scheme && a.port == b.port &&
+           std::ranges::equal(a.host, b.host, {}, ascii_lower, ascii_lower);
+}
+
+bool is_loopback_or_private_host(std::string_view host) noexcept {
+    host = trim(host);
+    while (!host.empty() && host.back() == '.') {
+        host.remove_suffix(1);
+    }
+    if (host.empty()) {
+        return false;
+    }
+
+    // "localhost" or "*.localhost" (RFC 6761)
+    if (host.size() == 9 && starts_with_icase(host, "localhost")) {
+        return true;
+    }
+    if (host.size() > 10 && host[host.size() - 10] == '.' &&
+        starts_with_icase(host.substr(host.size() - 9), "localhost")) {
+        return true;
+    }
+
+    // IPv6 literal: [::1], [::], link-local fe80::/10, unique-local fc00::/7, IPv4-mapped ::ffff:a.b.c.d
+    if (host.front() == '[' && host.back() == ']') {
+        std::string_view v6 = host.substr(1, host.size() - 2);
+        if (const auto zone = v6.find('%'); zone != std::string_view::npos) {
+            v6 = v6.substr(0, zone);
+        }
+        if (v6 == "::1" || v6 == "::" || v6 == "0:0:0:0:0:0:0:1" || v6 == "0:0:0:0:0:0:0:0") {
+            return true;
+        }
+        if (starts_with_icase(v6, "::ffff:")) {
+            return is_loopback_or_private_host(v6.substr(7));
+        }
+        if (v6.size() >= 2) {
+            const char c0 = ascii_lower(v6[0]);
+            const char c1 = ascii_lower(v6[1]);
+            // fc00::/7 (unique local)
+            if (c0 == 'f' && (c1 == 'c' || c1 == 'd')) {
+                return true;
+            }
+            // fe80::/10 (link-local)
+            if (v6.size() >= 3 && c0 == 'f' && c1 == 'e') {
+                const char c2 = ascii_lower(v6[2]);
+                if (c2 == '8' || c2 == '9' || c2 == 'a' || c2 == 'b') {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // IPv4 dotted-quad literal: a.b.c.d
+    uint8_t octets[4]{};
+    std::string_view rem = host;
+    for (int i = 0; i < 4; ++i) {
+        const auto dot = rem.find('.');
+        if ((i < 3 && dot == std::string_view::npos) || (i == 3 && dot != std::string_view::npos)) {
+            return false;
+        }
+        const std::string_view part = (i < 3) ? rem.substr(0, dot) : rem;
+        uint32_t val = 0;
+        const auto [ptr, ec] = std::from_chars(part.data(), part.data() + part.size(), val);
+        if (ec != std::errc{} || ptr != part.data() + part.size() || part.empty() || val > 255) {
+            return false;
+        }
+        octets[i] = static_cast<uint8_t>(val);
+        if (i < 3) {
+            rem.remove_prefix(dot + 1);
+        }
+    }
+
+    const uint8_t a = octets[0];
+    const uint8_t b = octets[1];
+    return a == 0 ||                               // 0.0.0.0/8 ("this" network)
+           a == 10 ||                              // 10.0.0.0/8 (RFC 1918)
+           a == 127 ||                             // 127.0.0.0/8 (loopback)
+           (a == 169 && b == 254) ||               // 169.254.0.0/16 (link-local / cloud metadata)
+           (a == 172 && b >= 16 && b <= 31) ||     // 172.16.0.0/12 (RFC 1918)
+           (a == 192 && b == 168) ||               // 192.168.0.0/16 (RFC 1918)
+           (a == 100 && b >= 64 && b <= 127);      // 100.64.0.0/10 (RFC 6598 shared address space)
+}
+
 } // namespace deoxdm::core

@@ -162,3 +162,34 @@ DEOXDM_TEST(url_redact_credentials) {
     ASSERT_EQ(redact_credentials("https://example.com/a?mail=x@y.z"), "https://example.com/a?mail=x@y.z");
     ASSERT_EQ(redact_credentials("not a url"), "not a url");
 }
+
+DEOXDM_TEST(url_same_origin_and_private_host_detection) {
+    ASSERT_TRUE(same_origin(*parse_url("https://Example.COM/a"), *parse_url("https://example.com:443/b")));
+    ASSERT_FALSE(same_origin(*parse_url("https://example.com/a"), *parse_url("http://example.com/a")));
+    ASSERT_FALSE(same_origin(*parse_url("https://example.com:8443/a"), *parse_url("https://example.com/a")));
+
+    ASSERT_TRUE(is_loopback_or_private_host("localhost"));
+    ASSERT_TRUE(is_loopback_or_private_host("LOCALHOST."));
+    ASSERT_TRUE(is_loopback_or_private_host("sub.localhost"));
+    ASSERT_TRUE(is_loopback_or_private_host("127.0.0.1"));
+    ASSERT_TRUE(is_loopback_or_private_host("127.255.255.254"));
+    ASSERT_TRUE(is_loopback_or_private_host("0.0.0.0"));
+    ASSERT_TRUE(is_loopback_or_private_host("10.0.0.1"));
+    ASSERT_TRUE(is_loopback_or_private_host("172.16.0.1"));
+    ASSERT_TRUE(is_loopback_or_private_host("172.31.255.254"));
+    ASSERT_TRUE(is_loopback_or_private_host("192.168.1.1"));
+    ASSERT_TRUE(is_loopback_or_private_host("169.254.169.254"));
+    ASSERT_TRUE(is_loopback_or_private_host("100.64.0.1"));
+    ASSERT_TRUE(is_loopback_or_private_host("[::1]"));
+    ASSERT_TRUE(is_loopback_or_private_host("[fe80::1]"));
+    ASSERT_TRUE(is_loopback_or_private_host("[fd12:3456::1]"));
+    ASSERT_TRUE(is_loopback_or_private_host("[::ffff:127.0.0.1]"));
+    ASSERT_TRUE(is_loopback_or_private_host("[::ffff:169.254.169.254]"));
+
+    ASSERT_FALSE(is_loopback_or_private_host("example.com"));
+    ASSERT_FALSE(is_loopback_or_private_host("notlocalhost.com"));
+    ASSERT_FALSE(is_loopback_or_private_host("93.184.216.34"));
+    ASSERT_FALSE(is_loopback_or_private_host("172.32.0.1"));
+    ASSERT_FALSE(is_loopback_or_private_host("192.169.1.1"));
+    ASSERT_FALSE(is_loopback_or_private_host("[2001:db8::1]"));
+}

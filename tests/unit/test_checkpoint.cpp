@@ -114,3 +114,14 @@ DEOXDM_TEST(checkpoint_validation) {
     dated.last_modified = "Fri, 02 Jan 2026 00:00:00 GMT";
     ASSERT_FALSE(validate_resume_compatibility(resume, url, dated).has_value());
 }
+
+DEOXDM_TEST(checkpoint_sanitizes_newlines_on_serialize) {
+    auto data = sample_resume_data();
+    data.etag = "\"v1\"\nurl=https://evil.example/payload.bin";
+    data.last_modified = "Thu\r\ntotal_size=999999";
+
+    const auto restored = deserialize_checkpoint(serialize_checkpoint(data));
+    ASSERT_TRUE(restored.has_value());
+    ASSERT_EQ(restored->url, "https://example.com/test.iso");
+    ASSERT_EQ(restored->total_size, 1000u);
+}

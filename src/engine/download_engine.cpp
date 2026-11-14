@@ -11,10 +11,12 @@
 #include "deoxdm/platform/path.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <exception>
 #include <format>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -49,6 +51,7 @@ uint64_t sum_downloaded(std::span<const ChunkState> chunks) noexcept {
 // Everything the worker threads of one run share.
 struct DownloadEngine::Session {
     std::string url;
+    core::DownloadConfig transfer_config;
     core::RemoteFileInfo remote;
     core::ChunkPlan plan;
     OutputFile file;
@@ -61,15 +64,31 @@ struct DownloadEngine::Session {
 
     std::mutex mutex;                // guards chunks and fatal_error
     std::vector<ChunkState> chunks;
+    std::unique_ptr<std::atomic<uint64_t>[]> chunk_bytes; // lock-free per-chunk byte counter
     std::optional<Error> fatal_error;
     std::condition_variable_any wakeup; // interruptible sleeps
     double smoothed_speed{0.0};      // monitor thread only, read after it is joined
 
-    Session(std::string download_url, uint64_t max_speed_bps)
-        : url(std::move(download_url)), limiter(max_speed_bps) {}
+    Session(std::string download_url, core::DownloadConfig cfg)
+        : url(std::move(download_url)), transfer_config(std::move(cfg)), limiter(transfer_config.max_speed_bps) {}
+
+    void init_chunk_bytes() {
+        chunk_bytes = std::make_unique<std::atomic<uint64_t>[]>(chunks.size());
+        for (size_t i = 0; i < chunks.size(); ++i) {
+            chunk_bytes[i].store(chunks[i].bytes_downloaded, std::memory_order_relaxed);
+        }
+    }
+
+    void sync_chunk_bytes_locked() noexcept {
+        if (!chunk_bytes) return;
+        for (size_t i = 0; i < chunks.size(); ++i) {
+            chunks[i].bytes_downloaded = chunk_bytes[i].load(std::memory_order_relaxed);
+        }
+    }
 
     [[nodiscard]] std::vector<ChunkState> snapshot() {
         std::scoped_lock lock(mutex);
+        sync_chunk_bytes_locked();
         return chunks;
     }
 
@@ -158,6 +177,7 @@ std::expected<DownloadEngine::OutputTarget, Error> DownloadEngine::resolve_outpu
     // A name the user did not choose must never silently replace a file. Pick
     // "name.1.ext", "name.2.ext", ... instead, unless one of those names holds
     // an unfinished download of this very URL, which is then continued.
+    bool allow_overwrite = !name_is_derived || config_.overwrite;
     if (name_is_derived && !config_.overwrite) {
         const auto is_our_unfinished_download = [&](const std::filesystem::path& candidate) {
             if (!can_resume || !CheckpointStore::exists(candidate)) return false;
@@ -177,8 +197,13 @@ std::expected<DownloadEngine::OutputTarget, Error> DownloadEngine::resolve_outpu
             const std::filesystem::path candidate = (n == 0)
                 ? target
                 : directory / platform::path_from_utf8(core::numbered_filename(name, n));
-            if (is_our_unfinished_download(candidate) || is_free(candidate)) {
+            if (is_our_unfinished_download(candidate)) {
                 target = candidate;
+                allow_overwrite = true;
+                found = true;
+            } else if (is_free(candidate)) {
+                target = candidate;
+                allow_overwrite = false;
                 found = true;
             }
         }
@@ -193,7 +218,7 @@ std::expected<DownloadEngine::OutputTarget, Error> DownloadEngine::resolve_outpu
             std::format("'{}' is a directory", platform::path_to_utf8(target))});
     }
 
-    return OutputTarget{std::move(target), name_is_derived};
+    return OutputTarget{std::move(target), name_is_derived, allow_overwrite};
 }
 
 std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std::stop_token& stop_token) {
@@ -215,14 +240,31 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
         return std::unexpected(probe.error());
     }
 
-    Session session(config_.url, config_.max_speed_bps);
+    if (config_.max_file_size > 0 && probe->content_length && *probe->content_length > config_.max_file_size) {
+        return std::unexpected(Error{
+            ErrorCode::InvalidArgument,
+            std::format("Remote file size ({} bytes) exceeds maximum allowed size ({} bytes)",
+                        *probe->content_length, config_.max_file_size)
+        });
+    }
+
+    Session session(config_.url, config_);
     session.remote = std::move(*probe);
     const core::RemoteFileInfo& remote = session.remote;
+
+    if (!remote.effective_url.empty() && remote.effective_url != config_.url) {
+        if (const auto effective = core::parse_url(remote.effective_url)) {
+            session.transfer_config.url = remote.effective_url;
+            if (!core::same_origin(*url, *effective)) {
+                session.transfer_config.headers.clear();
+            }
+        }
+    }
 
     advance(EventType::ProbeCompleted, "Preparing download");
 
     // 3. Decide where the file goes and whether an earlier run can be continued
-    const bool can_resume = config_.resume_enabled && remote.accepts_ranges &&
+    const bool can_resume = config_.resume_enabled && !config_.overwrite && remote.accepts_ranges &&
                             remote.content_length && *remote.content_length > 0;
 
     const auto output_target = resolve_output_path(remote, url->filename, can_resume);
@@ -231,6 +273,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
     }
     const std::filesystem::path& output_path = output_target->path;
     const bool server_chosen_name = output_target->server_chosen_name;
+    const bool allow_overwrite = output_target->allow_overwrite;
 
     if (can_resume && CheckpointStore::exists(output_path)) {
         auto checkpoint = CheckpointStore::load(output_path);
@@ -261,7 +304,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
             session.plan = core::create_unknown_size_plan();
         }
 
-        auto file = OutputFile::create(output_path, remote.content_length, server_chosen_name);
+        auto file = OutputFile::create(output_path, remote.content_length, server_chosen_name, allow_overwrite);
         if (!file) {
             return std::unexpected(file.error());
         }
@@ -269,6 +312,7 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
     }
 
     session.chunks = session.plan.chunks;
+    session.init_chunk_bytes();
     session.checkpointing = can_resume;
     session.send_range = remote.accepts_ranges && session.plan.size_known;
     session.bytes_at_start = sum_downloaded(session.chunks);
@@ -302,7 +346,26 @@ std::expected<core::DownloadResult, Error> DownloadEngine::run_session(const std
     advance(EventType::PlanReady, std::format("{} with {} connection{}",
         session.resumed ? "Resuming" : "Downloading", std::max<uint32_t>(workers, 1), workers > 1 ? "s" : ""));
 
-    const auto transferred = transfer(session, stop_token);
+    auto transferred = transfer(session, stop_token);
+
+    // If a server advertised Accept-Ranges on HEAD but ignored Range on GET,
+    // fall back to a single unsegmented transfer instead of failing.
+    if (!transferred && transferred.error().code == ErrorCode::RangeNotSupported &&
+        session.plan.is_segmented && !session.resumed && session.remote.content_length &&
+        !stop_token.stop_requested()) {
+        CheckpointStore::remove(output_path);
+        session.remote.accepts_ranges = false;
+        session.checkpointing = false;
+        session.send_range = false;
+        session.fatal_error.reset();
+        if (auto fallback_plan = core::create_chunk_plan(
+                *session.remote.content_length, 1, false, config_.min_chunk_size)) {
+            session.plan = std::move(*fallback_plan);
+            session.chunks = session.plan.chunks;
+            session.init_chunk_bytes();
+            transferred = transfer(session, stop_token);
+        }
+    }
 
     if (!transferred) {
         if (session.checkpointing) {
@@ -390,6 +453,7 @@ std::expected<void, Error> DownloadEngine::transfer(Session& session, const std:
         auto last_sample_time = session.started_at;
         uint64_t last_sample_bytes = session.bytes_at_start;
         auto last_checkpoint = Clock::now();
+        uint64_t last_checkpoint_bytes = session.bytes_at_start;
 
         while (true) {
             std::vector<ChunkState> chunks;
@@ -399,6 +463,7 @@ std::expected<void, Error> DownloadEngine::transfer(Session& session, const std:
                 if (monitor_token.stop_requested()) {
                     return;
                 }
+                session.sync_chunk_bytes_locked();
                 chunks = session.chunks;
             }
 
@@ -415,10 +480,13 @@ std::expected<void, Error> DownloadEngine::transfer(Session& session, const std:
             report_progress(chunks);
 
             if (session.checkpointing && now - last_checkpoint >= kCheckpointInterval) {
-                // Flush first: the checkpoint must never claim bytes that a
-                // power loss could still take away.
-                if (session.file.sync()) {
-                    (void)CheckpointStore::save(session.file.path(), session.resume_data(chunks));
+                if (downloaded != last_checkpoint_bytes) {
+                    // Flush first: the checkpoint must never claim bytes that a
+                    // power loss could still take away.
+                    if (session.file.sync()) {
+                        (void)CheckpointStore::save(session.file.path(), session.resume_data(chunks));
+                        last_checkpoint_bytes = downloaded;
+                    }
                 }
                 last_checkpoint = Clock::now();
             }
@@ -430,6 +498,7 @@ std::expected<void, Error> DownloadEngine::transfer(Session& session, const std:
             std::optional<uint32_t> claimed;
             {
                 std::scoped_lock lock(session.mutex);
+                session.sync_chunk_bytes_locked();
                 for (auto& chunk : session.chunks) {
                     if (chunk.status == ChunkStatus::Pending && !chunk.is_complete()) {
                         chunk.status = ChunkStatus::Downloading;
@@ -451,6 +520,7 @@ std::expected<void, Error> DownloadEngine::transfer(Session& session, const std:
 
             {
                 std::scoped_lock lock(session.mutex);
+                session.sync_chunk_bytes_locked();
                 ChunkState& chunk = session.chunks[*claimed];
                 if (outcome) {
                     chunk.status = ChunkStatus::Completed;
@@ -486,6 +556,7 @@ std::expected<void, Error> DownloadEngine::transfer(Session& session, const std:
     monitor.join();
 
     // From here on this thread is the only one touching the session.
+    session.sync_chunk_bytes_locked();
     report_progress(session.chunks);
 
     if (session.fatal_error) {
@@ -509,11 +580,11 @@ std::expected<void, Error> DownloadEngine::download_chunk_with_retries(
     bool send_range = session.send_range;
     uint32_t failures = 0;
 
-    const auto bytes_on_disk = [&] {
-        std::scoped_lock lock(session.mutex);
-        return session.chunks[chunk_index].bytes_downloaded;
+    const auto bytes_on_disk = [&]() noexcept {
+        return session.chunk_bytes[chunk_index].load(std::memory_order_relaxed);
     };
-    const auto restart_chunk = [&] {
+    const auto restart_chunk = [&]() noexcept {
+        session.chunk_bytes[chunk_index].store(0, std::memory_order_relaxed);
         std::scoped_lock lock(session.mutex);
         session.chunks[chunk_index].bytes_downloaded = 0;
     };
@@ -525,8 +596,7 @@ std::expected<void, Error> DownloadEngine::download_chunk_with_retries(
         if (auto written = session.file.write_at(offset, data); !written) {
             return written;
         }
-        std::scoped_lock lock(session.mutex);
-        session.chunks[chunk_index].bytes_downloaded += data.size();
+        session.chunk_bytes[chunk_index].fetch_add(data.size(), std::memory_order_relaxed);
         return {};
     };
 
@@ -536,10 +606,14 @@ std::expected<void, Error> DownloadEngine::download_chunk_with_retries(
             .range = session.plan.chunks[chunk_index].range,
             .already_downloaded = before,
             .send_range = send_range,
-            .whole_file = whole_file
+            .whole_file = whole_file,
+            .expected_total_size = session.total_size(),
+            .expected_etag = session.remote.etag,
+            .expected_last_modified = session.remote.last_modified,
+            .max_bytes = config_.max_file_size
         };
 
-        auto outcome = net::HttpClient::download_chunk(config_, request, sink, stop_token);
+        auto outcome = net::HttpClient::download_chunk(session.transfer_config, request, sink, stop_token);
         if (outcome) {
             return {};
         }

@@ -252,6 +252,9 @@ DEOXDM_TEST(gui_session_survives_restart) {
         // the application is closed.
     }
     ASSERT_TRUE(QFileInfo::exists(sessionFile));
+    ASSERT_EQ(QFileInfo(sessionFile).permissions() &
+              (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ReadOther | QFileDevice::WriteOther),
+              QFileDevice::Permissions{});
     ASSERT_TRUE(engine::CheckpointStore::exists(interruptedPath.toStdString()));
 
     server.stop_throttling();
@@ -303,6 +306,8 @@ DEOXDM_TEST(gui_model_presents_tasks) {
     ASSERT_EQ(model.data(model.index(0, DownloadModel::NameColumn)).toString(), QStringLiteral("report.pdf"));
     ASSERT_EQ(model.data(model.index(0, DownloadModel::SizeColumn)).toString(), QStringLiteral("2.00 KB"));
     ASSERT_EQ(model.data(model.index(0, DownloadModel::StatusColumn)).toString(), QStringLiteral("Completed"));
+    ASSERT_EQ(model.data(model.index(0, DownloadModel::ProgressColumn), Qt::AccessibleTextRole).toString(), QStringLiteral("100%"));
+    ASSERT_EQ(model.data(model.index(0, DownloadModel::NameColumn), Qt::AccessibleTextRole).toString(), QStringLiteral("report.pdf"));
     ASSERT_TRUE(model.data(model.index(0, DownloadModel::SpeedColumn)).toString().isEmpty());
     ASSERT_TRUE(model.data(model.index(0, DownloadModel::NameColumn), Qt::ToolTipRole).toString().contains(task->spec().url));
     ASSERT_FALSE(model.data(model.index(5, 0)).isValid());

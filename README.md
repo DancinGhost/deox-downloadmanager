@@ -13,12 +13,12 @@
 
 ### Desktop Application (`deox-dm-gui` with Qt 6)
 <p align="center">
-  <img src="assets/gui-preview.png" alt="Deox Download Manager Desktop GUI Preview" width="850">
+  <img src="docs/images/gui-preview.png" alt="Deox Download Manager Desktop GUI Preview" width="850">
 </p>
 
 ### Terminal CLI (`deox-dm`)
 <p align="center">
-  <img src="assets/terminal-preview.svg" alt="Deox Download Manager CLI Terminal Demo" width="850">
+  <img src="docs/images/terminal-preview.svg" alt="Deox Download Manager CLI Terminal Demo" width="850">
 </p>
 
 ---
@@ -178,6 +178,7 @@ Output:
 Transfer:
   -c, --connections <NUM>    Parallel connections per download, 1-64 (default: 4)
   -l, --limit-rate <RATE>    Cap the download speed, e.g. 500K or 2M bytes per second
+      --max-size <SIZE>      Abort if the file exceeds SIZE, e.g. 100M or 4G
   -t, --timeout <SEC>        Give up on a connection attempt or a stalled transfer
                              after SEC seconds; 0 disables the timeout (default: 30)
   -r, --retries <NUM>        Retries per segment after a transient failure (default: 3)

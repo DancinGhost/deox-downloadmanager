@@ -74,7 +74,9 @@ void File::close() noexcept {
 Result<File> File::open(const std::filesystem::path& path, OpenMode mode, OpenOptions options) noexcept {
     int flags = O_CLOEXEC;
     switch (mode) {
-        case OpenMode::CreateTruncate: flags |= O_RDWR | O_CREAT | O_TRUNC; break;
+        // Truncate only after fstat confirms that the opened descriptor is a
+        // regular file, never a FIFO, device node, or symlink target.
+        case OpenMode::CreateTruncate: flags |= O_RDWR | O_CREAT; break;
         case OpenMode::CreateNew:      flags |= O_RDWR | O_CREAT | O_EXCL; break;
         case OpenMode::OpenExisting:   flags |= O_RDWR; break;
         case OpenMode::ReadOnly:       flags |= O_RDONLY; break;
@@ -99,6 +101,11 @@ Result<File> File::open(const std::filesystem::path& path, OpenMode mode, OpenOp
     }
     if (!S_ISREG(st.st_mode)) {
         return error_from(EINVAL);
+    }
+    if (mode == OpenMode::CreateTruncate && st.st_size > 0) {
+        if (auto res = file.resize(0); !res) {
+            return std::unexpected(res.error());
+        }
     }
     return file;
 }

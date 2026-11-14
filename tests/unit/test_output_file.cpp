@@ -202,6 +202,10 @@ DEOXDM_TEST(file_writer_server_chosen_name_never_follows_links) {
     // A name the user chose still follows links, as the user asked for.
     ASSERT_TRUE(OutputFile::create(planted, 4, false).has_value());
     ASSERT_EQ(std::filesystem::file_size(victim), 4u);
+
+    // When allow_overwrite is false, even an existing regular file is refused (O_EXCL).
+    ASSERT_FALSE(OutputFile::create(victim, 4, true, false).has_value());
+    ASSERT_EQ(std::filesystem::file_size(victim), 4u);
 }
 
 DEOXDM_TEST(checkpoint_is_private_and_ignores_planted_links) {
@@ -227,5 +231,11 @@ DEOXDM_TEST(checkpoint_is_private_and_ignores_planted_links) {
     const auto perms = std::filesystem::status(checkpoint_path).permissions();
     ASSERT_EQ(perms & (std::filesystem::perms::group_all | std::filesystem::perms::others_all), std::filesystem::perms::none);
     ASSERT_TRUE(CheckpointStore::load(target).has_value());
+
+    // A symlinked checkpoint file must be refused by both exists() and load().
+    CheckpointStore::remove(target);
+    std::filesystem::create_symlink(victim, checkpoint_path);
+    ASSERT_FALSE(CheckpointStore::exists(target));
+    ASSERT_FALSE(CheckpointStore::load(target).has_value());
 }
 #endif

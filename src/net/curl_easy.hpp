@@ -35,6 +35,10 @@ public:
         return handle_ != nullptr;
     }
 
+    // Resets all per-request options to their defaults while keeping the
+    // underlying connection cache, TLS session cache, and DNS cache alive.
+    void reset();
+
     void set_url(const std::string& url);
     void set_range(const std::string& range_spec); // "0-499" or "500-"
     void set_nobody(bool nobody);                  // true: HEAD request
@@ -63,6 +67,8 @@ public:
     [[nodiscard]] std::string redirect_url() const;
 
 private:
+    void configure_defaults();
+
     // Returns whether libcurl accepted the option. A failed non-optional
     // option is remembered and reported by perform().
     template <typename T>

@@ -61,12 +61,27 @@ jobs:
     - name: Test
       run: ctest --test-dir build --output-on-failure
 
+    - name: Test (ThreadSanitizer)
+      if: matrix.build_type == 'Debug'
+      run: |
+        cmake -B build-tsan -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+          -DDEOXDM_ENABLE_TSAN=ON \
+          -DDEOXDM_BUILD_GUI=OFF \
+          -DBUILD_TESTING=ON
+        cmake --build build-tsan --verbose
+        ctest --test-dir build-tsan --output-on-failure
+
   canary:
     needs: test
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     # One publish at a time; a newer push waits instead of interrupting a
     # half-finished upload.
     concurrency:
@@ -93,10 +108,13 @@ jobs:
           -DCMAKE_C_COMPILER=gcc-14 \
           -DDEOXDM_BUILD_GUI=ON \
           -DDEOXDM_BUILD_ID="canary-${GITHUB_SHA::7}" \
-          -DBUILD_TESTING=OFF
+          -DBUILD_TESTING=ON
 
     - name: Build
       run: cmake --build build
+
+    - name: Verify Release Binary
+      run: ctest --test-dir build --output-on-failure
 
     - name: Package
       run: |
@@ -106,6 +124,11 @@ jobs:
         tar -C stage -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
         (cd dist && sha256sum -- * > SHA256SUMS)
         cat dist/SHA256SUMS
+
+    - name: Attest Build Provenance
+      uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v1.4.3
+      with:
+        subject-path: "dist/${{ env.PACKAGE }}.tar.gz"
 
     - name: Write release notes
       run: |

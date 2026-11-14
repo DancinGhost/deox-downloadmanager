@@ -52,3 +52,18 @@ DEOXDM_TEST(rate_limiter_wait_is_interruptible) {
     ASSERT_FALSE(result.load());
     ASSERT_TRUE(Clock::now() - start < std::chrono::seconds(5));
 }
+
+DEOXDM_TEST(rate_limiter_dynamic_set_rate_wakes_waiter) {
+    RateLimiter limiter(10); // 10 bytes/second: would wait 100 s
+    std::atomic<bool> result{false};
+
+    const auto start = Clock::now();
+    std::jthread waiter([&] { result = limiter.acquire(1000, {}); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    limiter.set_rate(0); // switch to unlimited
+    waiter.join();
+
+    ASSERT_TRUE(result.load());
+    ASSERT_EQ(limiter.rate(), 0u);
+    ASSERT_TRUE(Clock::now() - start < std::chrono::seconds(5));
+}

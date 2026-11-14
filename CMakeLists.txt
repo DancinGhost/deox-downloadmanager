@@ -13,7 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # All programs end up directly in the build directory:
-# build/deox-dm, build/deox-dm-gui, build/deoxdm_tests, ...
+# build/deox-dm, build/deox-dm-gui, build/deoxdm_unit_tests, ...
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -86,7 +86,7 @@ include(DeoxdmDependencies)
 # ---------------------------------------------------------------------------
 add_subdirectory(src)
 
-if(DEOXDM_BUILD_CLI OR BUILD_TESTING)
+if(DEOXDM_BUILD_CLI)
     add_subdirectory(apps/cli)
 endif()
 

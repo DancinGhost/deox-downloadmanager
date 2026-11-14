@@ -65,7 +65,7 @@ void ProgressDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     const bool selected = option.state.testFlag(QStyle::State_Selected);
     const QPalette::ColorGroup group = option.state.testFlag(QStyle::State_Active) ? QPalette::Active : QPalette::Inactive;
     const QColor text = palette.color(group, selected ? QPalette::HighlightedText : QPalette::Text);
-    const QColor fill = (selected && task->status() == TaskStatus::Running) ? text : fillColor(task->status(), palette);
+    const QColor fill = selected ? text : fillColor(task->status(), palette);
     QColor track = text;
     track.setAlphaF(selected ? 0.25f : 0.12f);
 

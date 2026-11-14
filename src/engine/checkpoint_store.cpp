@@ -6,8 +6,7 @@
 #include "deoxdm/version.hpp"
 
 #include <format>
-#include <fstream>
-#include <iterator>
+#include <string>
 
 namespace deoxdm::engine {
 
@@ -15,6 +14,8 @@ namespace {
 
 using core::Error;
 using core::ErrorCode;
+
+constexpr uint64_t kMaxCheckpointBytes = 1024 * 1024;
 
 } // namespace
 
@@ -26,7 +27,8 @@ std::filesystem::path CheckpointStore::checkpoint_path_for(const std::filesystem
 
 bool CheckpointStore::exists(const std::filesystem::path& target_file) noexcept {
     std::error_code ec;
-    return std::filesystem::is_regular_file(checkpoint_path_for(target_file), ec);
+    return std::filesystem::is_regular_file(
+        std::filesystem::symlink_status(checkpoint_path_for(target_file), ec));
 }
 
 std::expected<void, Error> CheckpointStore::save(
@@ -46,15 +48,46 @@ std::expected<void, Error> CheckpointStore::save(
 std::expected<core::ResumeData, Error> CheckpointStore::load(const std::filesystem::path& target_file) {
     const auto checkpoint_path = checkpoint_path_for(target_file);
 
-    std::ifstream ifs(checkpoint_path, std::ios::in | std::ios::binary);
-    if (!ifs.is_open()) {
+    auto file = platform::File::open(checkpoint_path, platform::OpenMode::ReadOnly, {.follow_symlinks = false});
+    if (!file) {
         return std::unexpected(Error{
             ErrorCode::FileSystemError,
-            std::format("Cannot open checkpoint '{}'", platform::path_to_utf8(checkpoint_path))
+            std::format("Cannot open checkpoint '{}': {}", platform::path_to_utf8(checkpoint_path), file.error().message())
         });
     }
 
-    const std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    const auto file_size = file->size();
+    if (!file_size) {
+        return std::unexpected(Error{
+            ErrorCode::FileSystemError,
+            std::format("Cannot inspect checkpoint '{}': {}", platform::path_to_utf8(checkpoint_path), file_size.error().message())
+        });
+    }
+    if (*file_size > kMaxCheckpointBytes) {
+        return std::unexpected(Error{
+            ErrorCode::StateCorrupted,
+            std::format("Checkpoint '{}' exceeds maximum allowed size ({} bytes)", platform::path_to_utf8(checkpoint_path), kMaxCheckpointBytes)
+        });
+    }
+
+    std::string content(static_cast<size_t>(*file_size), '\0');
+    size_t offset = 0;
+    while (offset < content.size()) {
+        auto read = file->read_at(offset, std::span<uint8_t>(
+            reinterpret_cast<uint8_t*>(content.data() + offset), content.size() - offset));
+        if (!read) {
+            return std::unexpected(Error{
+                ErrorCode::FileSystemError,
+                std::format("Cannot read checkpoint '{}': {}", platform::path_to_utf8(checkpoint_path), read.error().message())
+            });
+        }
+        if (*read == 0) {
+            content.resize(offset);
+            break;
+        }
+        offset += *read;
+    }
+
     return core::deserialize_checkpoint(content);
 }
 

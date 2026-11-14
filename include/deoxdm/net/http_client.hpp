@@ -19,6 +19,10 @@ struct ChunkRequest {
     uint64_t already_downloaded{0}; // bytes of this chunk that are already on disk
     bool send_range{true};          // false: plain GET of the entire resource
     bool whole_file{false};         // the chunk spans the entire resource
+    std::optional<uint64_t> expected_total_size{}; // total resource size from probing, if known
+    std::string expected_etag;                     // strong ETag from probing, if any
+    std::string expected_last_modified;            // Last-Modified from probing, if any
+    uint64_t max_bytes{0};                         // maximum allowed total file size, 0 = unlimited
 };
 
 class HttpClient {

@@ -91,10 +91,10 @@ apps/
 ├── cli/                deox-dm
 └── gui/                deox-dm-gui (model/, views/)
 tests/
-├── unit/  integration/  gui/   test suites
-└── support/                    test framework and mock HTTP server
+├── unit/  integration/  cli/  gui/   test suites
+└── support/                          test framework and mock HTTP server
 packaging/              install rules; linux/ desktop entry and icon
-docs/                   architecture and platform notes
+docs/                   architecture, platform notes, and preview images (images/)
 ```
 
 Dependencies only point down the layer diagram: `core` ← `platform`, `net` ← `engine` ← `apps`. Each library declares its dependencies in its own `CMakeLists.txt`, so a wrong-direction include fails to link.

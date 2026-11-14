@@ -150,8 +150,10 @@ void TerminalUI::render_tty(const core::ProgressSnapshot& snapshot, std::span<co
             } else if (chunk.status == core::ChunkStatus::Downloading) {
                 cell = std::format(" [{:3.0f}%]", chunk.progress_ratio() * 100.0);
                 color = kYellow;
+            } else if (chunk.bytes_downloaded == 0) {
+                cell = " [wait]";
             } else {
-                cell = std::format(" [{:3.0f}%]", chunk.progress_ratio() * 100.0);
+                cell = std::format(" ({:3.0f}%)", chunk.progress_ratio() * 100.0);
             }
 
             const int reserve = (shown + 1 < chunks.size()) ? 8 : 0; // room for " +NN more"

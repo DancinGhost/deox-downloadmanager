@@ -164,6 +164,7 @@ struct DownloadConfig {
     uint32_t timeout_seconds{30};         // connect timeout, and how long a stalled transfer is tolerated
     uint32_t max_retries{3};              // consecutive failed attempts per chunk before giving up
     uint64_t max_speed_bps{0};            // total download rate cap in bytes/second, 0 = unlimited
+    uint64_t max_file_size{0};            // maximum allowed file size in bytes, 0 = unlimited
     bool allow_insecure_tls{false};
     bool resume_enabled{true};
     bool overwrite{false};                // with a derived file name: replace an existing file instead of renaming

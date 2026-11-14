@@ -69,6 +69,7 @@ private:
     struct OutputTarget {
         std::filesystem::path path;
         bool server_chosen_name{false}; // the name came from the server, not from config.output_path
+        bool allow_overwrite{true};     // false when a newly chosen derived name must be created with O_EXCL
     };
 
     [[nodiscard]] std::expected<OutputTarget, core::Error> resolve_output_path(

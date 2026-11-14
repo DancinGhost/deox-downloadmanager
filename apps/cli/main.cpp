@@ -11,9 +11,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -110,13 +112,18 @@ int main(int argc, char* argv[]) {
     deoxdm::platform::install_interrupt_handler();
 
     std::stop_source stop_source;
-    std::jthread signal_watcher([&stop_source](const std::stop_token& watcher_stop) {
+    std::mutex watcher_mutex;
+    std::condition_variable_any watcher_cv;
+    std::jthread signal_watcher([&](const std::stop_token& watcher_stop) {
+        std::unique_lock lock(watcher_mutex);
         while (!watcher_stop.stop_requested()) {
             if (deoxdm::platform::interrupt_requested()) {
                 stop_source.request_stop();
                 return;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            watcher_cv.wait_for(lock, watcher_stop, std::chrono::milliseconds(20), [] {
+                return deoxdm::platform::interrupt_requested();
+            });
         }
     });
 

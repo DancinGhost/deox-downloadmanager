@@ -89,11 +89,13 @@ inline constexpr int CURLINFO_CONTENT_LENGTH_DOWNLOAD_T = 0x600000 + 15;
 inline constexpr long CURL_GLOBAL_DEFAULT = 3;
 inline constexpr size_t CURL_ERROR_SIZE = 256;
 
+#ifndef DEOXDM_CURL_ABI_CONSTANTS_ONLY
 extern "C" {
     CURLcode curl_global_init(long flags);
     void curl_global_cleanup(void);
 
     CURL* curl_easy_init(void);
+    void curl_easy_reset(CURL* curl);
     void curl_easy_cleanup(CURL* curl);
     CURLcode curl_easy_setopt(CURL* curl, int option, ...);
     CURLcode curl_easy_getinfo(CURL* curl, int info, ...);
@@ -103,5 +105,6 @@ extern "C" {
     curl_slist* curl_slist_append(curl_slist* list, const char* string);
     void curl_slist_free_all(curl_slist* list);
 }
+#endif
 
 } // namespace deoxdm::net::abi

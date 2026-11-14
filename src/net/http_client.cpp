@@ -21,10 +21,8 @@ constexpr bool is_redirect(uint32_t status) noexcept {
     return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
-bool same_origin(const core::Url& a, const core::Url& b) noexcept {
-    const auto lower = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; };
-    return a.scheme == b.scheme && a.port == b.port &&
-           std::ranges::equal(a.host, b.host, {}, lower, lower);
+bool is_strong_etag(std::string_view etag) noexcept {
+    return !etag.empty() && !etag.starts_with("W/") && !etag.starts_with("w/");
 }
 
 void apply_common_options(CurlEasy& curl, const core::DownloadConfig& config) {
@@ -41,11 +39,16 @@ void apply_common_options(CurlEasy& curl, const core::DownloadConfig& config) {
 // libcurl's own redirect handling sends every custom header to whichever host
 // a redirect points at (it only holds back Authorization and Cookie), and lets
 // an https download continue over plain http. Here the custom headers only go
-// to the origin the user named, and an https URL never leads to an http one.
+// to the origin the user named, an https URL never leads to an http one, and a
+// public host cannot redirect to a loopback or private-network address.
 //
 // The write callback sees the bodies of redirect responses too; it has to
 // pass them over (see is_redirect()).
-std::expected<void, Error> perform_following_redirects(CurlEasy& curl, const core::DownloadConfig& config) {
+std::expected<void, Error> perform_following_redirects(
+    CurlEasy& curl,
+    const core::DownloadConfig& config,
+    std::string_view protocol_header = {}
+) {
     auto origin = core::parse_url(config.url);
     if (!origin) {
         return std::unexpected(origin.error());
@@ -56,8 +59,15 @@ std::expected<void, Error> perform_following_redirects(CurlEasy& curl, const cor
 
     for (uint32_t redirects = 0;; ++redirects) {
         curl.set_url(url);
-        if (!config.headers.empty()) {
-            curl.set_headers(at_origin ? config.headers : std::vector<std::string>{});
+        if (!config.headers.empty() || !protocol_header.empty()) {
+            std::vector<std::string> headers;
+            if (at_origin) {
+                headers = config.headers;
+            }
+            if (!protocol_header.empty()) {
+                headers.emplace_back(protocol_header);
+            }
+            curl.set_headers(headers);
         }
 
         if (auto result = curl.perform(); !result) {
@@ -83,8 +93,12 @@ std::expected<void, Error> perform_following_redirects(CurlEasy& curl, const cor
             return std::unexpected(Error{ErrorCode::InvalidUrl,
                 "Refusing to follow a redirect from https to unencrypted http", status});
         }
+        if (!core::is_loopback_or_private_host(origin->host) && core::is_loopback_or_private_host(target->host)) {
+            return std::unexpected(Error{ErrorCode::InvalidUrl,
+                "Refusing to follow a redirect from a public host to a loopback or private address", status});
+        }
 
-        at_origin = same_origin(*origin, *target);
+        at_origin = core::same_origin(*origin, *target);
         url = std::move(next);
     }
 }
@@ -245,17 +259,25 @@ std::expected<void, Error> HttpClient::download_chunk(
 
     const uint64_t fetch_start = request.range.start_byte + request.already_downloaded;
     const uint64_t expected_bytes = bounded ? (chunk_length - request.already_downloaded) : 0;
+    const uint64_t max_bytes = request.max_bytes > 0 ? request.max_bytes : config.max_file_size;
     // A full "200 OK" body is only acceptable when the whole file was wanted anyway.
     const bool full_body_ok = request.whole_file && request.already_downloaded == 0;
 
-    CurlEasy curl;
+    thread_local CurlEasy curl;
+    curl.reset();
     apply_common_options(curl, config);
     curl.set_stall_timeout(config.timeout_seconds);
 
+    std::string if_range_header;
     if (request.send_range) {
         curl.set_range(bounded
             ? std::format("{}-{}", fetch_start, request.range.end_byte)
             : std::format("{}-", fetch_start));
+        if (is_strong_etag(request.expected_etag)) {
+            if_range_header = std::format("If-Range: {}", request.expected_etag);
+        } else if (request.expected_etag.empty() && !request.expected_last_modified.empty()) {
+            if_range_header = std::format("If-Range: {}", request.expected_last_modified);
+        }
     }
 
     core::ResponseHeaders headers;
@@ -284,9 +306,30 @@ std::expected<void, Error> HttpClient::download_chunk(
         if (!response_checked) {
             response_checked = true;
             const uint32_t status = headers.status;
+
+            if (!request.expected_etag.empty() && !headers.etag.empty() &&
+                headers.etag != request.expected_etag) {
+                failure = Error{ErrorCode::InvalidArgument,
+                    "Remote file changed during download (ETag differs)", status};
+                return 0;
+            }
+            if (request.expected_etag.empty() && !request.expected_last_modified.empty() &&
+                !headers.last_modified.empty() && headers.last_modified != request.expected_last_modified) {
+                failure = Error{ErrorCode::InvalidArgument,
+                    "Remote file changed during download (Last-Modified differs)", status};
+                return 0;
+            }
+
             if (status == 206) {
-                if (!headers.content_range || headers.content_range->first_byte != fetch_start) {
+                if (!headers.content_range || headers.content_range->first_byte != fetch_start ||
+                    (bounded && headers.content_range->last_byte != request.range.end_byte)) {
                     failure = Error{ErrorCode::RangeNotSupported, "Server answered with a different byte range than requested", status};
+                    return 0;
+                }
+                if (request.expected_total_size && headers.content_range->total_size &&
+                    *headers.content_range->total_size != *request.expected_total_size) {
+                    failure = Error{ErrorCode::InvalidArgument,
+                        "Remote file size changed during download", status};
                     return 0;
                 }
             } else if (status == 200) {
@@ -298,6 +341,20 @@ std::expected<void, Error> HttpClient::download_chunk(
                 failure = Error{ErrorCode::HttpError, std::format("Unexpected HTTP status {}", status), status};
                 return 0;
             }
+
+            if (max_bytes > 0 && headers.content_length && fetch_start + *headers.content_length > max_bytes) {
+                failure = Error{ErrorCode::InvalidArgument,
+                    std::format("Remote file size ({} bytes) exceeds maximum allowed size ({} bytes)",
+                                fetch_start + *headers.content_length, max_bytes),
+                    status};
+                return 0;
+            }
+        }
+
+        if (max_bytes > 0 && (fetch_start + received >= max_bytes || data.size() > max_bytes - (fetch_start + received))) {
+            failure = Error{ErrorCode::InvalidArgument,
+                std::format("Download exceeded maximum allowed file size ({} bytes)", max_bytes)};
+            return 0;
         }
 
         if (bounded && data.size() > expected_bytes - received) {
@@ -314,7 +371,7 @@ std::expected<void, Error> HttpClient::download_chunk(
         return data.size();
     });
 
-    const auto result = perform_following_redirects(curl, config);
+    const auto result = perform_following_redirects(curl, config, if_range_header);
 
     if (failure) {
         return std::unexpected(std::move(*failure));

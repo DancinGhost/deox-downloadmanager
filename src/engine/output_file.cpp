@@ -29,7 +29,8 @@ void remove_quietly(const std::filesystem::path& path) noexcept {
 std::expected<OutputFile, Error> OutputFile::create(
     const std::filesystem::path& path,
     std::optional<uint64_t> total_size,
-    bool server_chosen_name
+    bool server_chosen_name,
+    bool allow_overwrite
 ) {
     std::error_code ec;
     if (path.has_parent_path()) {
@@ -39,10 +40,9 @@ std::expected<OutputFile, Error> OutputFile::create(
         }
     }
 
-    platform::OpenMode mode = platform::OpenMode::CreateTruncate;
-    if (server_chosen_name && !std::filesystem::exists(std::filesystem::symlink_status(path, ec))) {
-        mode = platform::OpenMode::CreateNew;
-    }
+    const platform::OpenMode mode = (server_chosen_name && !allow_overwrite)
+        ? platform::OpenMode::CreateNew
+        : platform::OpenMode::CreateTruncate;
     auto file = platform::File::open(path, mode, {.follow_symlinks = !server_chosen_name});
     if (!file) {
         return fs_error(std::format("Cannot open '{}' for writing: {}", platform::path_to_utf8(path), file.error().message()));

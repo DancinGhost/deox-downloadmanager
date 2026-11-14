@@ -253,6 +253,7 @@ void DownloadQueue::save() const {
     QDir().mkpath(QFileInfo(sessionFile_).absolutePath());
     QSaveFile file(sessionFile_); // written to a temporary file, then renamed into place
     if (file.open(QIODevice::WriteOnly)) {
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
         file.commit();
     }

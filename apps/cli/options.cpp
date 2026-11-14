@@ -130,6 +130,10 @@ std::expected<Options, std::string> parse_arguments(std::span<const std::string_
             const auto rate = core::parse_byte_size(value("a rate such as 500K or 2M"));
             if (!problem && !rate) problem = "limit-rate must be a size such as 500K or 2M (bytes per second)";
             if (rate) options.config.max_speed_bps = *rate;
+        } else if (is("", "--max-size")) {
+            const auto size = core::parse_byte_size(value("a size such as 100M or 4G"));
+            if (!problem && (!size || *size == 0)) problem = "max-size must be a positive size such as 100M or 4G";
+            if (size && *size > 0) options.config.max_file_size = *size;
         } else if (is("-s", "--sha256")) {
             const std::string_view digest = trim(value("a SHA-256 checksum"));
             if (!problem && !core::is_valid_sha256_hex(digest)) problem = "sha256 must be 64 hexadecimal characters";
@@ -234,6 +238,7 @@ Output:
 Transfer:
   -c, --connections <NUM>    Parallel connections per download, 1-{2} (default: 4)
   -l, --limit-rate <RATE>    Cap the download speed, e.g. 500K or 2M bytes per second
+      --max-size <SIZE>      Abort if the file exceeds SIZE, e.g. 100M or 4G
   -t, --timeout <SEC>        Give up on a connection attempt or a stalled transfer
                              after SEC seconds; 0 disables the timeout (default: 30)
   -r, --retries <NUM>        Retries per segment after a transient failure (default: 3)

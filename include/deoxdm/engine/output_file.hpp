@@ -31,12 +31,13 @@ public:
     //
     // `server_chosen_name`: the file name came from the server, not from the
     // user. A symbolic link under that name is then never followed, and when
-    // nothing has that name yet the file is created exclusively, so nothing
-    // can be slipped in between the caller's check and the creation.
+    // `allow_overwrite` is false the file is created exclusively (O_EXCL), so
+    // nothing can be slipped in between the caller's check and the creation.
     [[nodiscard]] static std::expected<OutputFile, core::Error> create(
         const std::filesystem::path& path,
         std::optional<uint64_t> total_size,
-        bool server_chosen_name = false
+        bool server_chosen_name = false,
+        bool allow_overwrite = true
     );
 
     // Continues a download: the file must already exist with exactly the

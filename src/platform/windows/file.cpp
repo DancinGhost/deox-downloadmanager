@@ -74,7 +74,9 @@ Result<File> File::open(const std::filesystem::path& path, OpenMode mode, OpenOp
     DWORD access = GENERIC_READ;
     DWORD disposition = OPEN_EXISTING;
     switch (mode) {
-        case OpenMode::CreateTruncate: access |= GENERIC_WRITE; disposition = CREATE_ALWAYS; break;
+        // Truncate only after verifying the handle is a regular disk file and
+        // not a reparse point.
+        case OpenMode::CreateTruncate: access |= GENERIC_WRITE; disposition = OPEN_ALWAYS; break;
         case OpenMode::CreateNew:      access |= GENERIC_WRITE; disposition = CREATE_NEW; break;
         case OpenMode::OpenExisting:   access |= GENERIC_WRITE; disposition = OPEN_EXISTING; break;
         case OpenMode::ReadOnly:       break;
@@ -92,13 +94,22 @@ Result<File> File::open(const std::filesystem::path& path, OpenMode mode, OpenOp
         return last_error();
     }
     File file(static_cast<NativeHandle>(handle));
-    if (!options.follow_symlinks) {
-        BY_HANDLE_FILE_INFORMATION info{};
-        if (!::GetFileInformationByHandle(handle, &info)) {
-            return last_error();
-        }
-        if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-            return error_from(ERROR_CANT_ACCESS_FILE);
+    if (::GetFileType(handle) != FILE_TYPE_DISK) {
+        return error_from(ERROR_INVALID_PARAMETER);
+    }
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!::GetFileInformationByHandle(handle, &info)) {
+        return last_error();
+    }
+    if ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return error_from(ERROR_ACCESS_DENIED);
+    }
+    if (!options.follow_symlinks && (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return error_from(ERROR_CANT_ACCESS_FILE);
+    }
+    if (mode == OpenMode::CreateTruncate) {
+        if (auto res = file.resize(0); !res) {
+            return std::unexpected(res.error());
         }
     }
     return file;
